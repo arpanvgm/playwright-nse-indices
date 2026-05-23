@@ -1,0 +1,386 @@
+# Learnings & Debug Knowledge — Playwright & Site Behavior
+
+Technical discoveries about automating data downloads on this site. Focus: what works, what doesn't, why.
+
+---
+
+## The Core Challenge
+
+**Detecting when async data has loaded and is ready to download.**
+
+The site is SPA-like: Submit triggers AJAX, data loads asynchronously. We need to know when AJAX is done so we can check if the CSV link appeared (data exists) or stay hidden (no data).
+
+---
+
+## ✅ Solution: Listen for AJAX Response (RECOMMENDED)
+
+### Implementation
+```csharp
+// Set up response listener BEFORE triggering the AJAX
+var ajaxCompleted = new TaskCompletionSource<bool>();
+EventHandler<IResponse> responseHandler = (_, response) =>
+{
+    if (response.Url.Contains("Backpage.aspx") && response.Status == 200)
+        ajaxCompleted.TrySetResult(true);
+};
+page.Response += responseHandler;
+
+// Click the button that triggers AJAX
+await JsClick(page, SUBMIT_SEL);
+
+// Wait for the response (passive observation, doesn't break page)
+try
+{
+    await Task.WhenAny(ajaxCompleted.Task, Task.Delay(15_000));
+}
+finally
+{
+    page.Response -= responseHandler;  // clean up
+}
+
+// Small pause for DOM to update
+await page.WaitForTimeoutAsync(500);
+
+// Now check the result
+var visible = await page.IsVisibleAsync(CSV_SEL);
+```
+
+### Why This Works
+
+| Aspect | Benefit |
+|--------|---------|
+| **Direct signal** | AJAX response = data processing is done. No guessing. |
+| **Server speed agnostic** | Slow server? We wait. Fast server? We proceed. Automatic. |
+| **No DOM tricks** | Doesn't depend on visibility, CSS, or element state. Pure network signal. |
+| **Passive observation** | Listening to response event doesn't interfere with page's own JS. |
+| **Consistent timing** | Both "data found" and "no data" scenarios resolve in 1–3 seconds. |
+
+---
+
+## ❌ What NOT to Do
+
+### 1. NetworkIdle (Unreliable)
+```csharp
+await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 15_000 });
+```
+
+**Problem:** Analytics, tracking, and third-party scripts keep firing indefinitely. Network never truly "idle".
+
+**Result:** Timeout waits or fragile timing.
+
+---
+
+### 2. WaitForSelectorAsync(Visible) on Always-Present Elements
+```csharp
+await page.WaitForSelectorAsync(CSV_SEL, new() { State = WaitForSelectorState.Visible, Timeout = 20_000 });
+```
+
+**Problem:** The CSV link (`#exporthistoricaldiv`) is always in the DOM. It's just hidden/shown via CSS.
+
+**Expected:** Element becomes visible (AJAX completes, data loads).
+**Reality:** Element already exists but hidden. Wait never resolves until timeout.
+**Impact:** 20-second waste when no data exists.
+
+---
+
+### 3. Pre-Manipulating DOM with Inline Styles
+```csharp
+await page.EvaluateAsync($@"() => {{
+    document.querySelector('{CSV_SEL}').style.display = 'none';
+}}");
+```
+
+**Problem:** Inline `style.display:none` has higher specificity than CSS classes. Site's JS can't easily override it.
+
+**Result:** Even when data loads, CSV stays hidden because our inline style blocks it.
+
+---
+
+### 4. RouteAsync for Observation (Breaks Page)
+```csharp
+await page.RouteAsync("**/Backpage.aspx", route => { /* observe */ route.ContinueAsync(); });
+```
+
+**Problem:** Even with `ContinueAsync()`, request interception subtly alters timing. AJAX chains break.
+
+**Result:** Cascading dropdowns stop loading, AJAX calls fail.
+
+**Rule:** Use `page.RouteAsync` ONLY if you need to modify/block requests. Never for observation.
+
+---
+
+### 5. Reading Response Body in Event Handler
+```csharp
+page.Response += async (_, response) =>
+{
+    var body = await response.TextAsync();  // ❌ LOCKS response
+};
+```
+
+**Problem:** `response.TextAsync()` consumes the response stream. Locks it from the page's own JavaScript.
+
+**Result:** Page can't read the response data. AJAX handlers break.
+
+**Rule:** Use response listener ONLY for metadata (URL, status). Never call `TextAsync()` in the handler.
+
+---
+
+## 📍 Site Behavior: When Data Loads
+
+### Sequence (Data Available)
+1. **User selects dates** (or program via `SetDate`)
+2. **User clicks Submit** (or program via `JsClick`)
+3. **AJAX fires** → POST to Backpage.aspx
+4. **Server responds** (1–3 seconds typically)
+5. **Page's JS processes response** → updates DOM
+6. **Data table renders** with rows
+7. **Index Name displays**
+8. **CSV link appears** (becomes visible)
+
+### No Data Scenario
+1. **Same steps 1–4**
+2. **Server responds** but with empty/no-data indicator
+3. **Page's JS processes response** → doesn't render table
+4. **CSV link stays hidden** (no change from initial state)
+5. **No error message** — just silent absence
+
+### Key Insight
+The site doesn't show an error for "no data". It simply doesn't render the CSV link. **The CSV link's visibility IS the data availability signal.**
+
+---
+
+## DOM & Element Visibility Challenges
+
+### CSV Link is Always in DOM
+```html
+<a href="#" id="exporthistoricaldiv">csv format</a>
+```
+
+- Always present in HTML
+- Hidden by default via CSS class/style
+- Made visible by site's JS when data loads
+- **Problem:** `WaitForSelectorAsync` (checking existence) passes immediately because element exists
+
+### Visibility Check vs Existence Check
+```csharp
+// ❌ Wrong: checks if element exists (always true)
+await page.WaitForSelectorAsync(CSV_SEL, new() { Timeout = 20_000 });
+
+// ✅ Right: checks if element is visible (what we actually want)
+var isVisible = await page.IsVisibleAsync(CSV_SEL);
+```
+
+### offsetParent Check in JavaScript
+```javascript
+element.offsetParent === null  // element is hidden (display:none, visibility:hidden, or ancestor hidden)
+element.offsetParent !== null  // element is visible
+```
+
+Use this in custom JS for manual visibility checks.
+
+---
+
+## Date Setting: jQuery Datepicker
+
+### Native Input Methods Don't Work
+```csharp
+// ❌ This doesn't work:
+await page.FillAsync(selector, "01-01-2020");
+```
+
+**Why:** jQuery UI datepicker maintains internal date state separate from the input's visible value. Submit button reads the internal state, not the input value.
+
+### Correct Approach: Use jQuery API
+```csharp
+await page.EvaluateAsync($@"() => {{
+    jQuery('#datepickerFromDivYield').datepicker('setDate', new Date(2020, 0, 1));
+}}");
+```
+
+**Why:** Updates both the internal state (what Submit reads) and the visual input.
+
+### Fallback (If jQuery Unavailable)
+```javascript
+// Set value + fire events
+const el = document.querySelector(selector);
+el.value = '01-01-2020';
+el.dispatchEvent(new Event('input', { bubbles: true }));
+el.dispatchEvent(new Event('change', { bubbles: true }));
+el.dispatchEvent(new Event('blur', { bubbles: true }));
+```
+
+Less reliable but works on non-jQuery inputs.
+
+---
+
+## Clicking Elements: JS Click vs ClickAsync
+
+### ClickAsync Issues
+```csharp
+await page.ClickAsync(selector);  // ❌ Can timeout if element off-screen or in hidden section
+```
+
+**Problem:** Playwright's `ClickAsync` waits for element to be in viewport, visible, and stable. Elements in hidden sections cause 30-second timeout.
+
+### JS Click (Bypasses Visibility Requirement)
+```csharp
+await page.EvaluateAsync($@"() => {{
+    document.querySelector('{selector}')?.click();
+}}");
+```
+
+**Benefit:** Clicks element regardless of visibility, scroll position, or section state.
+
+**Use case:** When clicking elements that might be scrolled out of view or in hidden DOM sections.
+
+---
+
+## Timeout Strategy: Task.WhenAny Racing
+
+### Problem: Sequential Timeouts Waste Time
+```csharp
+// ❌ Waits for both, cumulative: could be 20+ seconds
+await page.WaitForSelectorAsync(..., new() { Timeout = 10_000 });
+await page.WaitForSelectorAsync(..., new() { Timeout = 10_000 });
+```
+
+### Solution: Race Multiple Conditions
+```csharp
+// ✅ Resolves when EITHER completes (1–3 seconds typically)
+var csvVisible = page.WaitForSelectorAsync(CSV_SEL, new() { State = WaitForSelectorState.Visible, Timeout = 20_000 });
+var networkIdle = page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 15_000 });
+
+await Task.WhenAny(csvVisible, networkIdle);
+
+// Check actual state (one of the conditions completed)
+var visible = await page.IsVisibleAsync(CSV_SEL);
+```
+
+**Benefit:** Both "success" and "failure" paths resolve quickly without waiting for timeouts.
+
+---
+
+## Page Load Timeouts from Third-Party Scripts
+
+### GotoAsync Hangs Indefinitely
+```csharp
+// ❌ This times out — analytics never finish loading
+await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.Load });
+```
+
+### Solution: DOMContentLoaded + Exception Swallow
+```csharp
+// ✅ DOMContentLoaded fires quickly, content is ready
+try
+{
+    await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 60_000 });
+}
+catch (TimeoutException)
+{
+    // Analytics still loading — that's fine, page content is ready
+}
+```
+
+**Why:** Google Analytics, Tag Manager, and other third-party scripts sometimes never finish. `DOMContentLoaded` fires when the page's own content is ready, ignoring third-party hangers.
+
+---
+
+## Browser Detection & Anti-Bot Measures
+
+### Two Flags Give Away Automation
+
+**1. navigator.webdriver**
+```csharp
+// ❌ Sites detect this:
+navigator.webdriver === true
+```
+
+**Fix:**
+```csharp
+await context.AddInitScriptAsync(
+    "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });");
+```
+
+**2. AutomationControlled Chrome Flag**
+```csharp
+// ❌ Chromium bundled with Playwright launches with this flag
+```
+
+**Fix:**
+```csharp
+await playwright.Chromium.LaunchAsync(new()
+{
+    Channel = "msedge",  // Use real installed Edge, not bundled Chromium
+    Args = new[] { "--disable-blink-features=AutomationControlled" }
+});
+```
+
+**Combined effect:** Browser becomes indistinguishable from manual user in Edge.
+
+**Note:** Without these fixes, the site throttles dropdown loading (10–30 seconds per dropdown). With both, instant response.
+
+---
+
+## Passive Event Listeners (Safe)
+
+### What's Safe
+```csharp
+page.Request += (_, request) =>
+{
+    Console.WriteLine(request.Url);  // ✅ Safe
+};
+
+page.Response += (_, response) =>
+{
+    if (response.Status == 200)  // ✅ Safe
+        Console.WriteLine("Success");
+};
+```
+
+**Why:** Pure observation. Doesn't alter request/response.
+
+### What's Unsafe
+```csharp
+page.Response += async (_, response) =>
+{
+    var body = await response.TextAsync();  // ❌ Unsafe — locks response
+};
+```
+
+---
+
+## Summary: Core Principles
+
+| Principle | Reason |
+|-----------|--------|
+| **Listen for AJAX response, not DOM state** | Direct signal; handles variable server speed |
+| **Use passive observation, not interception** | Doesn't break page's own JavaScript |
+| **Avoid pre-manipulating DOM** | Fights with site's CSS and JS |
+| **JS click instead of ClickAsync for hidden elements** | Bypasses visibility requirements |
+| **DOMContentLoaded instead of Load** | Third-party scripts don't block |
+| **Mask webdriver and AutomationControlled** | Site treats you like a human user |
+| **Task.WhenAny for racing conditions** | Resolves quickly without timeout waste |
+
+---
+
+## What Worked in This Automation
+
+✅ AJAX response listener (page.Response event)  
+✅ Passive observation only (no RouteAsync)  
+✅ JS-based clicking for off-screen elements  
+✅ CSV visibility as "data ready" signal  
+✅ jQuery datepicker API for date setting  
+✅ DOMContentLoaded with TimeoutException catch  
+✅ Real Edge browser with anti-bot flags masked  
+
+---
+
+## What Didn't Work
+
+❌ NetworkIdle (third-party requests interfere)  
+❌ WaitForSelectorAsync on always-present elements  
+❌ Pre-hiding with inline styles  
+❌ RouteAsync for observation  
+❌ Reading response.TextAsync() in event handler  
+❌ ClickAsync on off-screen elements  
+❌ Bundled Chromium without anti-bot fixes
