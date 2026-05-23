@@ -16,7 +16,7 @@ const string SUBMIT_SEL = "#submit_buttonDivdata";
 const string CSV_SEL    = "#exporthistoricaldiv";
 // ══════════════════════════════════════════════════
 
-var downloadsPath = @"D:\MarketData\Downloads";
+var downloadsPath = @"D:\MarketData\NseDownloads";
 
 var startDate = DateTime.ParseExact(START_DATE, "dd-MM-yyyy", null);
 var endDate   = DateTime.ParseExact(END_DATE,   "dd-MM-yyyy", null);
