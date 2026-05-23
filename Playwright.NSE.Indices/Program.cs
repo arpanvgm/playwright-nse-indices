@@ -4,7 +4,8 @@
 //  CONFIGURATION — edit before running
 // ═══════════════════════════════════════════════════
 const string START_DATE   = "01-01-2000";  // dd-MM-yyyy
-string END_DATE           = DateTime.Now.ToString("dd-MM-yyyy");  // runtime — today's date
+//string END_DATE           = "31-12-2014";
+string END_DATE           =  DateTime.Now.ToString("dd-MM-yyyy");  // runtime — today's date
 const int    CHUNK_MONTHS = 12;            // months per request (lower if site rejects)
 const int    DELAY_MS     = 4000;          // polite pause between downloads (ms)
 // ═══════════════════════════════════════════════════
