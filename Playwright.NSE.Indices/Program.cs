@@ -10,20 +10,24 @@ const int    CHUNK_MONTHS = 12;            // months per request (lower if site 
 const int    DELAY_MS     = 4000;          // polite pause between downloads (ms)
 
 // ═══════════════════════════════════════════════════
-//  INDEX NAMES TO DOWNLOAD  (Index Name dropdown)
-//  Must match site option text exactly (ALL CAPS).
-//  All names must share the same Index Type and
-//  Sub-Index selected manually in the browser.
+//  INDEX NAMES TO DOWNLOAD  — loaded from indices.json
+//  Each entry must match the site option text exactly
+//  (ALL CAPS). All names must share the same Index
+//  Type and Sub-Index selected manually in the browser.
 // ═══════════════════════════════════════════════════
-var INDEX_NAMES = new List<string>
+var indicesFilePath = Path.Combine(AppContext.BaseDirectory, "indices.json");
+if (!File.Exists(indicesFilePath))
 {
-    "NIFTY 50",
-    "NIFTY NEXT 50",
-    "NIFTY SMALLCAP 250",
-    "NIFTY SMALLCAP 50",
-    "NIFTY MIDCAP 150",
-    // ── add more index names here ─────────────────
-};
+    Console.Error.WriteLine($"ERROR: indices.json not found at: {indicesFilePath}");
+    return;
+}
+var INDEX_NAMES = System.Text.Json.JsonSerializer.Deserialize<List<string>>(
+    File.ReadAllText(indicesFilePath)) ?? new List<string>();
+if (INDEX_NAMES.Count == 0)
+{
+    Console.Error.WriteLine("ERROR: indices.json is empty or contains no index names.");
+    return;
+}
 
 // ═══════════════════════════════════════════════════
 //  SELECTORS  (default: P/E, P/B & Div.Yield report)

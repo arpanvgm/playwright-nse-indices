@@ -11,4 +11,10 @@
     <PackageReference Include="Microsoft.Playwright" Version="1.59.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="indices.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>
