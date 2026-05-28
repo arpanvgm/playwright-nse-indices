@@ -1,7 +1,30 @@
 ﻿[
-  "NIFTY 50",
-  "NIFTY NEXT 50",
-  "NIFTY SMALLCAP 250",
-  "NIFTY SMALLCAP 50",
-  "NIFTY MIDCAP 150"
+  {
+    "name": "NIFTY 50",
+    "subIndex": "Broad Market Indices"
+  },
+  {
+    "name": "NIFTY NEXT 50",
+    "subIndex": "Broad Market Indices"
+  },
+  {
+    "name": "NIFTY SMALLCAP 250",
+    "subIndex": "Broad Market Indices"
+  },
+  {
+    "name": "NIFTY SMALLCAP 50",
+    "subIndex": "Broad Market Indices"
+  },
+  {
+    "name": "NIFTY MIDCAP 150",
+    "subIndex": "Broad Market Indices"
+  },
+  {
+    "name": "NIFTY BANK",
+    "subIndex": "Sectoral Indices"
+  },
+  {
+    "name": "NIFTY PRIVATE BANK",
+    "subIndex": "Sectoral Indices"
+  }
 ]
