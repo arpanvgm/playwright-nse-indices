@@ -137,22 +137,16 @@ for (int idx = 0; idx < INDEX_NAMES.Count; idx++)
 {
     var indexName = INDEX_NAMES[idx];
 
-    Console.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    Console.WriteLine($"  [{idx + 1}/{INDEX_NAMES.Count}]  {indexName}");
-    Console.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
     // Auto-select Index Name by finding the visible dropdown containing the text
-    Console.Write($"  Selecting '{indexName}' ... ");
+    Console.Write($"  [{idx + 1}/{INDEX_NAMES.Count}]  {indexName}  -  Selecting '{indexName}' ... ");
     var selected = await SelectDropdownByText(page, indexName);
     if (!selected)
     {
         Console.WriteLine("FAILED — option not found. Skipping.");
-        Console.WriteLine();
         continue;
     }
     await page.WaitForTimeoutAsync(600);
     Console.WriteLine("done.");
-    Console.WriteLine();
 
     // ── Download loop for this index ──────────────────────────────────────────
     int success = 0, skipped = 0, failed = 0;
@@ -229,13 +223,6 @@ for (int idx = 0; idx < INDEX_NAMES.Count; idx++)
     totalSuccess += success;
     totalSkipped += skipped;
     totalFailed  += failed;
-
-    Console.WriteLine();
-    Console.WriteLine($"  Index   : {indexName}");
-    Console.WriteLine($"  Saved   : {success}");
-    Console.WriteLine($"  Skipped : {skipped}  (no data for period)");
-    Console.WriteLine($"  Failed  : {failed}");
-    Console.WriteLine();
 }
 
 // ── Grand summary ─────────────────────────────────────────────────────────────
