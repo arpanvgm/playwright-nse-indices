@@ -3,9 +3,8 @@
 // ═══════════════════════════════════════════════════
 //  CONFIGURATION — edit before running
 // ═══════════════════════════════════════════════════
-//const string START_DATE   = "01-01-1996";  // dd-MM-yyyy
 const string START_DATE   = "01-05-2026";  // dd-MM-yyyy
-string END_DATE           =  DateTime.Now.ToString("dd-MM-yyyy");  // runtime — today's date
+string END_DATE           = DateTime.Now.ToString("dd-MM-yyyy"); // runtime — today's date
 const int    CHUNK_MONTHS = 12;            // months per request (lower if site rejects)
 const int    DELAY_MS     = 4000;          // polite pause between downloads (ms)
 
@@ -23,6 +22,7 @@ if (!File.Exists(indicesFilePath))
 }
 var INDEX_NAMES = System.Text.Json.JsonSerializer.Deserialize<List<string>>(
     File.ReadAllText(indicesFilePath)) ?? new List<string>();
+
 if (INDEX_NAMES.Count == 0)
 {
     Console.Error.WriteLine("ERROR: indices.json is empty or contains no index names.");
@@ -30,17 +30,16 @@ if (INDEX_NAMES.Count == 0)
 }
 
 // ═══════════════════════════════════════════════════
-//  SELECTORS  (default: P/E, P/B & Div.Yield report)
-//  See readme.md for selectors for other report types
+//  REPORT CONFIGURATIONS
+//  The script will auto-detect which report you selected.
 // ═══════════════════════════════════════════════════
-const string FROM_SEL   = "#datepickerFromDivYield";
-const string TO_SEL     = "#datepickerToDivYield";
-const string SUBMIT_SEL = "#submit_buttonDivdata";
-const string CSV_SEL    = "#exporthistoricaldiv";
-
-// ID of the Index Name dropdown (confirmed from live DOM)
-const string INDEX_DD_SEL = "#ddlHistoricaldivtypeeindex";
-// ══════════════════════════════════════════════════
+var KNOWN_REPORTS = new[]
+{
+    new ReportSelectors("P/E, P/B & Div.Yield", "#datepickerFromDivYield", "#datepickerToDivYield", "#submit_buttonDivdata", "#exporthistoricaldiv"),
+    new ReportSelectors("Historical Data",      "#datepickerFrom",         "#datepickerTo",         "#submit_button",        "#exporthistorical"),
+    new ReportSelectors("VIX Data",             "#datepickerFromvixdata",  "#datepickerTovixdata",  "#submit_buttonvixdata", "#exporthistoricalvix"),
+    new ReportSelectors("Total Index",          "#datepickerFromtotalindex","#datepickerTototalindex","#submit_totalindexhistorical", "#exportTotalindex")
+};
 
 var downloadsPath = @"D:\MarketData\NseDownloads";
 
@@ -50,6 +49,7 @@ var endDate   = DateTime.ParseExact(END_DATE,   "dd-MM-yyyy", null);
 // Build date chunks
 var chunks = new List<(DateTime From, DateTime To)>();
 var cursor = startDate;
+
 while (cursor <= endDate)
 {
     var chunkEnd = cursor.AddMonths(CHUNK_MONTHS).AddDays(-1);
@@ -66,14 +66,12 @@ Console.WriteLine();
 
 // ── Launch browser ────────────────────────────────────────────────────────────
 using var playwright = await Playwright.CreateAsync();
-
 await using var browser = await playwright.Chromium.LaunchAsync(new()
 {
     Headless = false,
     Channel  = "msedge",
     Args     = new[] { "--disable-blink-features=AutomationControlled" }
 });
-
 await using var context = await browser.NewContextAsync(new() { AcceptDownloads = true });
 
 await context.AddInitScriptAsync(
@@ -96,15 +94,41 @@ Console.WriteLine("Page loaded.");
 // ── Step 1: manual selection of Report Type, Index Type, Sub-Index ────────────
 Console.WriteLine();
 Console.WriteLine("╔════════════════════════════════════════════════╗");
-Console.WriteLine("║  Select the first 3 dropdowns in the browser: ║");
-Console.WriteLine("║   1. Report Type  (e.g. P/E, P/B & Div.Yield) ║");
-Console.WriteLine("║   2. Index Type   (e.g. Equity)               ║");
+Console.WriteLine("║  Select the first 3 dropdowns in the browser:  ║");
+Console.WriteLine("║   1. Report Type  (e.g. Historical Data)       ║");
+Console.WriteLine("║   2. Index Type   (e.g. Equity)                ║");
 Console.WriteLine("║   3. Sub-Index    (e.g. Broad Market Indices)  ║");
 Console.WriteLine("║                                                ║");
-Console.WriteLine("║  Do NOT touch the Index Name or date fields.  ║");
-Console.WriteLine("║  Press ENTER when dropdowns 1–3 are set.      ║");
+Console.WriteLine("║  Do NOT touch the Index Name or date fields.   ║");
+Console.WriteLine("║  Press ENTER when dropdowns 1–3 are set.       ║");
 Console.WriteLine("╚════════════════════════════════════════════════╝");
 Console.ReadLine();
+
+// ── Step 1.5: Auto-detect active report type based on visible elements ────────
+Console.Write("Auto-detecting active report type... ");
+ReportSelectors activeSelectors = null;
+foreach (var report in KNOWN_REPORTS)
+{
+    var isVisible = await page.EvaluateAsync<bool>($@"() => {{
+        const el = document.querySelector('{report.From}');
+        return el && el.offsetParent !== null;
+    }}");
+
+    if (isVisible)
+    {
+        activeSelectors = report;
+        break;
+    }
+}
+
+if (activeSelectors == null)
+{
+    Console.WriteLine("FAILED");
+    Console.Error.WriteLine("ERROR: Could not detect the active report type. Did you select one in the browser?");
+    return;
+}
+Console.WriteLine($"Detected '{activeSelectors.Name}'");
+Console.WriteLine();
 
 // ── Main loop: iterate through all configured index names ─────────────────────
 int totalSuccess = 0, totalSkipped = 0, totalFailed = 0;
@@ -117,9 +141,9 @@ for (int idx = 0; idx < INDEX_NAMES.Count; idx++)
     Console.WriteLine($"  [{idx + 1}/{INDEX_NAMES.Count}]  {indexName}");
     Console.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-    // Auto-select Index Name dropdown by its known element ID
+    // Auto-select Index Name by finding the visible dropdown containing the text
     Console.Write($"  Selecting '{indexName}' ... ");
-    var selected = await SelectDropdownById(page, INDEX_DD_SEL, indexName);
+    var selected = await SelectDropdownByText(page, indexName);
     if (!selected)
     {
         Console.WriteLine("FAILED — option not found. Skipping.");
@@ -144,8 +168,8 @@ for (int idx = 0; idx < INDEX_NAMES.Count; idx++)
 
         try
         {
-            await SetDate(page, FROM_SEL, fromStr);
-            await SetDate(page, TO_SEL,   toStr);
+            await SetDate(page, activeSelectors.From, fromStr);
+            await SetDate(page, activeSelectors.To,   toStr);
             await page.WaitForTimeoutAsync(500);
 
             // Listen for AJAX response BEFORE clicking Submit
@@ -157,7 +181,7 @@ for (int idx = 0; idx < INDEX_NAMES.Count; idx++)
             };
             page.Response += responseHandler;
 
-            await JsClick(page, SUBMIT_SEL);
+            await JsClick(page, activeSelectors.Submit);
 
             try
             {
@@ -170,7 +194,8 @@ for (int idx = 0; idx < INDEX_NAMES.Count; idx++)
 
             await page.WaitForTimeoutAsync(500);
 
-            var csvVisible = await page.IsVisibleAsync(CSV_SEL);
+            var csvVisible = await page.IsVisibleAsync(activeSelectors.Csv);
+
             if (!csvVisible)
             {
                 Console.WriteLine("Skipped (no data for this period)");
@@ -181,7 +206,7 @@ for (int idx = 0; idx < INDEX_NAMES.Count; idx++)
             }
 
             var dlTask = page.WaitForDownloadAsync(new() { Timeout = 15_000 });
-            await JsClick(page, CSV_SEL);
+            await JsClick(page, activeSelectors.Csv);
             var dl = await dlTask;
 
             var filename = $"{safeFileName}_{fromStr.Replace("-", "")}_{toStr.Replace("-", "")}.csv";
@@ -221,6 +246,7 @@ Console.WriteLine($"  Total skipped : {totalSkipped}  (no data for period)");
 Console.WriteLine($"  Total failed  : {totalFailed}");
 Console.WriteLine($"  Folder        : {downloadsPath}");
 Console.WriteLine("════════════════════════════════════════════════════");
+
 Console.WriteLine();
 Console.WriteLine("Press any key to close the browser...");
 Console.ReadKey(true);
@@ -230,34 +256,38 @@ Console.ReadKey(true);
 // ────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// Selects an option in a dropdown by its element ID, matching on option text.
+/// Selects an option by scanning all visible dropdowns for the matching text.
 /// Uses jQuery trigger if available, otherwise native DOM events.
 /// Returns true if found and selected, false if option text not found.
 /// </summary>
-static async Task<bool> SelectDropdownById(IPage page, string selector, string optionText)
+static async Task<bool> SelectDropdownByText(IPage page, string optionText)
 {
     return await page.EvaluateAsync<bool>(@"(args) => {
-        const { sel, text } = args;
+        const { text } = args;
         const normalize = v => (v || '').replace(/\s+/g, ' ').trim();
 
-        const select = document.querySelector(sel);
-        if (!select) return false;
+        const selects = Array.from(document.querySelectorAll('select'));
+        for (const select of selects) {
+            // Skip hidden dropdowns
+            if (select.offsetParent === null) continue;
 
-        const option = Array.from(select.options)
-            .find(o => normalize(o.textContent) === normalize(text));
+            const option = Array.from(select.options)
+                .find(o => normalize(o.textContent) === normalize(text));
 
-        if (!option) return false;
+            if (option) {
+                select.value = option.value;
 
-        select.value = option.value;
-
-        if (typeof jQuery !== 'undefined') {
-            jQuery(select).val(option.value).trigger('change');
-        } else {
-            select.dispatchEvent(new Event('input',  { bubbles: true }));
-            select.dispatchEvent(new Event('change', { bubbles: true }));
+                if (typeof jQuery !== 'undefined') {
+                    jQuery(select).val(option.value).trigger('change');
+                } else {
+                    select.dispatchEvent(new Event('input',  { bubbles: true }));
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                return true;
+            }
         }
-        return true;
-    }", new { sel = selector, text = optionText });
+        return false;
+    }", new { text = optionText });
 }
 
 static async Task SetDate(IPage page, string selector, string value)
@@ -301,3 +331,8 @@ static string MakeSafeFileName(string value)
     var invalid = Path.GetInvalidFileNameChars();
     return new string(value.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray()).Trim();
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+//  RECORDS & TYPES
+// ────────────────────────────────────────────────────────────────────────────
+public record ReportSelectors(string Name, string From, string To, string Submit, string Csv);
