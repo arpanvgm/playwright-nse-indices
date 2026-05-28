@@ -3,18 +3,39 @@
 // ═══════════════════════════════════════════════════
 //  CONFIGURATION — edit before running
 // ═══════════════════════════════════════════════════
-const string START_DATE   = "01-01-1996";  // dd-MM-yyyy
-//string END_DATE           = "31-12-2014";
+//const string START_DATE   = "01-01-1996";  // dd-MM-yyyy
+const string START_DATE   = "01-05-2026";  // dd-MM-yyyy
 string END_DATE           =  DateTime.Now.ToString("dd-MM-yyyy");  // runtime — today's date
 const int    CHUNK_MONTHS = 12;            // months per request (lower if site rejects)
 const int    DELAY_MS     = 4000;          // polite pause between downloads (ms)
-// ═══════════════════════════════════════════════════
 
-// Selectors confirmed from live DOM scan
+// ═══════════════════════════════════════════════════
+//  INDEX NAMES TO DOWNLOAD  (Index Name dropdown)
+//  Must match site option text exactly (ALL CAPS).
+//  All names must share the same Index Type and
+//  Sub-Index selected manually in the browser.
+// ═══════════════════════════════════════════════════
+var INDEX_NAMES = new List<string>
+{
+    "NIFTY 50",
+    "NIFTY NEXT 50",
+    "NIFTY SMALLCAP 250",
+    "NIFTY SMALLCAP 50",
+    "NIFTY MIDCAP 150",
+    // ── add more index names here ─────────────────
+};
+
+// ═══════════════════════════════════════════════════
+//  SELECTORS  (default: P/E, P/B & Div.Yield report)
+//  See readme.md for selectors for other report types
+// ═══════════════════════════════════════════════════
 const string FROM_SEL   = "#datepickerFromDivYield";
 const string TO_SEL     = "#datepickerToDivYield";
 const string SUBMIT_SEL = "#submit_buttonDivdata";
 const string CSV_SEL    = "#exporthistoricaldiv";
+
+// ID of the Index Name dropdown (confirmed from live DOM)
+const string INDEX_DD_SEL = "#ddlHistoricaldivtypeeindex";
 // ══════════════════════════════════════════════════
 
 var downloadsPath = @"D:\MarketData\NseDownloads";
@@ -33,9 +54,10 @@ while (cursor <= endDate)
     cursor = chunkEnd.AddDays(1);
 }
 
-Console.WriteLine($"Range  : {START_DATE} to {END_DATE}");
-Console.WriteLine($"Chunks : {chunks.Count} x {CHUNK_MONTHS}-month slices");
-Console.WriteLine($"Output : {downloadsPath}");
+Console.WriteLine($"Range   : {START_DATE} to {END_DATE}");
+Console.WriteLine($"Chunks  : {chunks.Count} x {CHUNK_MONTHS}-month slices");
+Console.WriteLine($"Indices : {INDEX_NAMES.Count}");
+Console.WriteLine($"Output  : {downloadsPath}");
 Console.WriteLine();
 
 // ── Launch browser ────────────────────────────────────────────────────────────
@@ -67,35 +89,46 @@ catch (TimeoutException)
 }
 Console.WriteLine("Page loaded.");
 
-// ── Step 1: manual dropdown selection ────────────────────────────────────────
+// ── Step 1: manual selection of Report Type, Index Type, Sub-Index ────────────
 Console.WriteLine();
-Console.WriteLine("╔═══════════════════════════════════════════════╗");
-Console.WriteLine("║  Select ALL dropdowns in the browser:         ║");
-Console.WriteLine("║   1. Report Type  (P/E, P/B & Div.Yield)      ║");
+Console.WriteLine("╔════════════════════════════════════════════════╗");
+Console.WriteLine("║  Select the first 3 dropdowns in the browser: ║");
+Console.WriteLine("║   1. Report Type  (e.g. P/E, P/B & Div.Yield) ║");
 Console.WriteLine("║   2. Index Type   (e.g. Equity)               ║");
-Console.WriteLine("║   3. Sub-Index    (e.g. Sectoral Indices)     ║");
-Console.WriteLine("║   4. Index Name   (e.g. Nifty Bank)           ║");
-Console.WriteLine("║                                               ║");
-Console.WriteLine("║  Do NOT touch the date fields.                ║");
-Console.WriteLine("║  Press ENTER when all 4 dropdowns are set.    ║");
-Console.WriteLine("╚═══════════════════════════════════════════════╝");
+Console.WriteLine("║   3. Sub-Index    (e.g. Broad Market Indices)  ║");
+Console.WriteLine("║                                                ║");
+Console.WriteLine("║  Do NOT touch the Index Name or date fields.  ║");
+Console.WriteLine("║  Press ENTER when dropdowns 1–3 are set.      ║");
+Console.WriteLine("╚════════════════════════════════════════════════╝");
 Console.ReadLine();
-    
-// ── Main loop: support multiple indices ──────────────────────────────────────
-bool runAnotherCycle = true;
-while (runAnotherCycle)
+
+// ── Main loop: iterate through all configured index names ─────────────────────
+int totalSuccess = 0, totalSkipped = 0, totalFailed = 0;
+
+for (int idx = 0; idx < INDEX_NAMES.Count; idx++)
 {
-    
-    var selectedIndexName = await GetSelectedDropdownText(page, 4);
-    Console.WriteLine($"Selected Index Name: {selectedIndexName}");
+    var indexName = INDEX_NAMES[idx];
+
+    Console.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    Console.WriteLine($"  [{idx + 1}/{INDEX_NAMES.Count}]  {indexName}");
+    Console.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    // Auto-select Index Name dropdown by its known element ID
+    Console.Write($"  Selecting '{indexName}' ... ");
+    var selected = await SelectDropdownById(page, INDEX_DD_SEL, indexName);
+    if (!selected)
+    {
+        Console.WriteLine("FAILED — option not found. Skipping.");
+        Console.WriteLine();
+        continue;
+    }
+    await page.WaitForTimeoutAsync(600);
+    Console.WriteLine("done.");
     Console.WriteLine();
 
-    // ── Step 2: automated download loop ──────────────────────────────────────────
-    Console.WriteLine("Starting automated download loop...");
-    Console.WriteLine();
-
+    // ── Download loop for this index ──────────────────────────────────────────
     int success = 0, skipped = 0, failed = 0;
-    var safeFileName = MakeSafeFileName(selectedIndexName);
+    var safeFileName = MakeSafeFileName(indexName);
 
     for (int i = 0; i < chunks.Count; i++)
     {
@@ -103,45 +136,36 @@ while (runAnotherCycle)
         var fromStr    = from.ToString("dd-MM-yyyy");
         var toStr      = to.ToString("dd-MM-yyyy");
 
-        Console.Write($"[{i+1}/{chunks.Count}] {fromStr} to {toStr} ... ");
+        Console.Write($"  [{i + 1}/{chunks.Count}] {fromStr} to {toStr} ... ");
 
         try
         {
-            // Set From / To dates
             await SetDate(page, FROM_SEL, fromStr);
             await SetDate(page, TO_SEL,   toStr);
             await page.WaitForTimeoutAsync(500);
 
-            // Set up listener for AJAX response BEFORE clicking Submit
-            // The site makes POST calls to Backpage.aspx — when response arrives, AJAX is done
+            // Listen for AJAX response BEFORE clicking Submit
             var ajaxCompleted = new TaskCompletionSource<bool>();
             EventHandler<IResponse> responseHandler = (_, response) =>
             {
                 if (response.Url.Contains("Backpage.aspx") && response.Status == 200)
-                {
                     ajaxCompleted.TrySetResult(true);
-                }
             };
             page.Response += responseHandler;
 
-            // Click Submit (this triggers the AJAX call)
             await JsClick(page, SUBMIT_SEL);
 
-            // Wait for the data AJAX response (max 15s)
-            // Server slow? We wait. Server fast? We proceed immediately.
             try
             {
                 await Task.WhenAny(ajaxCompleted.Task, Task.Delay(15_000));
             }
             finally
             {
-                page.Response -= responseHandler;  // clean up listener
+                page.Response -= responseHandler;
             }
 
-            // Small pause for DOM to update after response
             await page.WaitForTimeoutAsync(500);
 
-            // Now check: did the CSV link appear? (signals data was found)
             var csvVisible = await page.IsVisibleAsync(CSV_SEL);
             if (!csvVisible)
             {
@@ -152,12 +176,11 @@ while (runAnotherCycle)
                 continue;
             }
 
-            // Data is ready — download
             var dlTask = page.WaitForDownloadAsync(new() { Timeout = 15_000 });
             await JsClick(page, CSV_SEL);
             var dl = await dlTask;
 
-            var filename = $"{safeFileName}_{fromStr.Replace("-","")}_{toStr.Replace("-","")}.csv";
+            var filename = $"{safeFileName}_{fromStr.Replace("-", "")}_{toStr.Replace("-", "")}.csv";
             await dl.SaveAsAsync(Path.Combine(downloadsPath, filename));
             Console.WriteLine($"Saved: {filename}");
             success++;
@@ -174,41 +197,64 @@ while (runAnotherCycle)
             await page.WaitForTimeoutAsync(DELAY_MS);
     }
 
-    // ── Summary for this index ───────────────────────────────────────────────────
+    totalSuccess += success;
+    totalSkipped += skipped;
+    totalFailed  += failed;
+
     Console.WriteLine();
-    Console.WriteLine("════════════════════════════════════");
-    Console.WriteLine($"  Index  : {selectedIndexName}");
+    Console.WriteLine($"  Index   : {indexName}");
     Console.WriteLine($"  Saved   : {success}");
     Console.WriteLine($"  Skipped : {skipped}  (no data for period)");
     Console.WriteLine($"  Failed  : {failed}");
-    Console.WriteLine($"  Folder  : {downloadsPath}");
-    Console.WriteLine("════════════════════════════════════");
     Console.WriteLine();
+}
 
-    // Ask if user wants to download another index
-    Console.WriteLine("╔══════════════════════════════════════════════════════╗");
-    Console.WriteLine("║  Download another index?                             ║");
-    Console.WriteLine("║  Select only another Index and press 'Y' to continue ║");
-    Console.WriteLine("║                                                      ║");
-    Console.WriteLine("║  Press any other key to EXIT                         ║");
-    Console.WriteLine("╚══════════════════════════════════════════════════════╝");
-    var key = Console.ReadKey(true);
-    if(selectedIndexName == await GetSelectedDropdownText(page, 4) && (key.KeyChar == 'Y' || key.KeyChar == 'y'))
-    {
-        Console.WriteLine("╔════════════════════════════════════════════════════════════════╗");
-        Console.WriteLine(" You have not selected another Index. It is same as before.");
-        Console.WriteLine();
-        Console.WriteLine(" Please select another Index first and then press any key...");
-        Console.WriteLine();
-        Console.WriteLine("╚════════════════════════════════════════════════════════════════╝");
-        Console.ReadKey(true);
-    }
-    runAnotherCycle = (key.KeyChar == 'Y' || key.KeyChar == 'y');
-} // close while loop
+// ── Grand summary ─────────────────────────────────────────────────────────────
+Console.WriteLine("════════════════════════════════════════════════════");
+Console.WriteLine($"  ALL DONE — {INDEX_NAMES.Count} indices processed");
+Console.WriteLine($"  Total saved   : {totalSuccess}");
+Console.WriteLine($"  Total skipped : {totalSkipped}  (no data for period)");
+Console.WriteLine($"  Total failed  : {totalFailed}");
+Console.WriteLine($"  Folder        : {downloadsPath}");
+Console.WriteLine("════════════════════════════════════════════════════");
+Console.WriteLine();
+Console.WriteLine("Press any key to close the browser...");
+Console.ReadKey(true);
 
 // ────────────────────────────────────────────────────────────────────────────
 //  HELPERS
 // ────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Selects an option in a dropdown by its element ID, matching on option text.
+/// Uses jQuery trigger if available, otherwise native DOM events.
+/// Returns true if found and selected, false if option text not found.
+/// </summary>
+static async Task<bool> SelectDropdownById(IPage page, string selector, string optionText)
+{
+    return await page.EvaluateAsync<bool>(@"(args) => {
+        const { sel, text } = args;
+        const normalize = v => (v || '').replace(/\s+/g, ' ').trim();
+
+        const select = document.querySelector(sel);
+        if (!select) return false;
+
+        const option = Array.from(select.options)
+            .find(o => normalize(o.textContent) === normalize(text));
+
+        if (!option) return false;
+
+        select.value = option.value;
+
+        if (typeof jQuery !== 'undefined') {
+            jQuery(select).val(option.value).trigger('change');
+        } else {
+            select.dispatchEvent(new Event('input',  { bubbles: true }));
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        return true;
+    }", new { sel = selector, text = optionText });
+}
 
 static async Task SetDate(IPage page, string selector, string value)
 {
@@ -244,43 +290,6 @@ static async Task JsClick(IPage page, string selector)
         const el = document.querySelector('{selector}');
         if (el) el.click();
     }}");
-}
-
-static async Task<string> GetSelectedDropdownText(IPage page, int dropdownNumber)
-{
-    return await page.EvaluateAsync<string>(
-        @"(n) => {
-            const normalize      = v => (v || '').replace(/\s+/g, ' ').trim();
-            const isPlaceholder  = v =>
-                !v || /^-+$/.test(v) || /^select\b/i.test(v) || /^please select\b/i.test(v);
-
-            const visibleSelects = Array.from(document.querySelectorAll('select'))
-                .filter(s => s.offsetParent !== null);
-
-            const texts = visibleSelects
-                .map(s => {
-                    const opt = s.options[s.selectedIndex];
-                    return normalize(opt?.textContent || s.value);
-                })
-                .filter(t => !isPlaceholder(t));
-
-            if (texts.length >= n)       return texts[n - 1];
-            if (texts.length > 0)        return texts[texts.length - 1];
-
-            const customTexts = Array.from(document.querySelectorAll(
-                '.select2-selection__rendered, .chosen-single span, ' +
-                '.filter-option-inner-inner, .ui-selectmenu-text'
-            ))
-                .filter(el => el.offsetParent !== null)
-                .map(el => normalize(el.textContent))
-                .filter(t => !isPlaceholder(t));
-
-            if (customTexts.length >= n) return customTexts[n - 1];
-            if (customTexts.length > 0)  return customTexts[customTexts.length - 1];
-
-            return '(dropdown not found)';
-        }",
-        dropdownNumber);
 }
 
 static string MakeSafeFileName(string value)
