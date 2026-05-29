@@ -90,12 +90,22 @@ await context.AddInitScriptAsync(
 
 var page = await context.NewPageAsync();
 
+// Block heavy assets (images, fonts, media) to speed up initial load
+await page.RouteAsync("**/*", route =>
+{
+    var type = route.Request.ResourceType;
+    if (type == "image" || type == "media" || type == "font")
+        route.AbortAsync();
+    else
+        route.ContinueAsync();
+});
+
 Console.WriteLine("Opening page...");
 
 try
 {
     await page.GotoAsync("https://niftyindices.com/reports/historical-data",
-        new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 60_000 });
+        new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 15_000 });
 
 }
 catch (TimeoutException)
