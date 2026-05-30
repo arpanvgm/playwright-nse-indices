@@ -223,7 +223,7 @@
   {
     "name": "NIFTY500 HEALTHCARE",
     "subIndex": "Sectoral Indices",
-    "enabled": true
+    "enabled": false
   },
 
 
