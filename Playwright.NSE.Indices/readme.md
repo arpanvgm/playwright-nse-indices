@@ -1,9 +1,8 @@
-<ai-response>
-  <file path="Playwright.NSE.Indices/readme.md"><![CDATA[
-# NiftyIndices Historical Data Downloader
+﻿# NiftyIndices Historical Data Downloader
 
 Automates downloading historical CSV data from [niftyindices.com/reports/historical-data](https://niftyindices.com/reports/historical-data).
 The site enforces a date range limit in its UI, making bulk downloads tedious.
+
 This tool lets you **select your base report once manually**, then automatically loops through your full date range and configured indices — downloading one CSV per chunk — and saves them all to a local folder.
 
 ---
@@ -71,10 +70,14 @@ Downloading FFmpeg ...
 Open `Program.cs` and edit the **4 lines** at the top before running:
 
 ~~~csharp
-const string START_DATE   = "01-01-2015"; // Start of your date range  (dd-MM-yyyy)
-const string END_DATE     = "31-12-2024"; // End of your date range    (dd-MM-yyyy)
-const int    CHUNK_MONTHS = 12;           // Months per download chunk (12 = yearly)
-const int    DELAY_MS     = 4000;         // Pause between downloads   (milliseconds)
+const int    START_YEAR   = 2015;
+// Starts on 1st January of this year
+string END_DATE           = DateTime.Now.ToString("dd-MM-yyyy");
+// runtime — today's date
+const int    CHUNK_MONTHS = 12;
+// Months per download chunk (12 = yearly)
+const int    DELAY_MS     = 4000;
+// Pause between downloads   (milliseconds)
 ~~~
 
 ### What is DELAY_MS?
@@ -87,7 +90,8 @@ The tool splits your full date range into smaller chunks of this many months eac
 `12` (one year per request) works reliably. Reduce to `6` or `3` if the site starts rejecting requests.
 
 ### 2. Index Configuration (`indices.json`)
-The tool dynamically reads the indices you want to download from `indices.json`. You can easily skip certain indices by setting `"enabled": false` without having to delete them from the file:
+The tool dynamically reads the indices you want to download from `indices.json`.
+You can easily skip certain indices by setting `"enabled": false` without having to delete them from the file:
 
 ~~~json
 [
@@ -165,15 +169,18 @@ The tool takes over completely. For each enabled index and date chunk it:
 
 ## Output files
 
-Downloaded CSVs are saved to the configured output folder (default `D:\MarketData\NseDownloads`).
-File naming format: `IndexName_DDMMYYYY_DDMMYYYY.csv`
+Downloaded CSVs are saved to subfolders based on the report type inside the configured output folder (default `D:\MarketData\NseDownloads`).
+File naming format: `IndexName_ReportType_YYYY.csv`
 
 Example:
 ~~~text
 NseDownloads/
-  NIFTY_50_01012016_31122016.csv
-  NIFTY_50_01012017_31122017.csv
-  ...
+  Price/
+    NIFTY_50_Price_2016.csv
+    NIFTY_50_Price_2017.csv
+  PE/
+    NIFTY_50_PE_2016.csv
+    NIFTY_50_PE_2017.csv
 ~~~
 
 ---
@@ -182,7 +189,9 @@ NseDownloads/
 
 **Page takes too long to load / timeout on startup**
 
-The site loads slowly due to third-party analytics scripts. The tool handles this automatically by blocking heavy assets (images, fonts, media) to speed up loading and bypassing the analytics timeout after 15 seconds. Just wait briefly — it will proceed.
+The site loads slowly due to third-party analytics scripts.
+The tool handles this automatically by blocking heavy assets (images, fonts, media) to speed up loading and bypassing the analytics timeout after 15 seconds.
+Just wait briefly — it will proceed.
 
 **A chunk fails mid-run**
 
@@ -191,7 +200,8 @@ This is expected for early dates. The loop continues automatically to the next c
 
 **Dropdowns load slowly**
 
-If the Sub-Index dropdown is slow to populate, the tool already uses your real Edge browser with bot-detection disabled. If it persists, try closing other Edge windows before running.
+If the Sub-Index dropdown is slow to populate, the tool already uses your real Edge browser with bot-detection disabled.
+If it persists, try closing other Edge windows before running.
 
 ---
 
@@ -203,5 +213,3 @@ If the Sub-Index dropdown is slow to populate, the tool already uses your real E
 - Sets dates programmatically via the **jQuery UI datepicker API** (`datepicker('setDate', ...)`) which updates the datepicker's internal state — not just the visible input text
 - Clicks Submit and the CSV link via direct JavaScript (`el.click()`) to bypass Playwright's visibility requirements
 - All downloaded files are captured via Playwright's download interception and saved with descriptive filenames
-]]></file>
-</ai-response>

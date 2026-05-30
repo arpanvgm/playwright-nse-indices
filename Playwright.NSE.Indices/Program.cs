@@ -4,8 +4,8 @@ using System.Text.Json;
 // ═══════════════════════════════════════════════════
 //  CONFIGURATION — edit before running
 // ═══════════════════════════════════════════════════
-const string START_DATE   = "01-01-1996";
-// dd-MM-yyyy
+const int    START_YEAR   = 1996;
+// starts on 1st January of this year
 string END_DATE           = DateTime.Now.ToString("dd-MM-yyyy");
 // runtime — today's date
 const int    CHUNK_MONTHS = 12;
@@ -45,13 +45,15 @@ var KNOWN_REPORTS = new[]
 {
     new ReportSelectors("P/E, P/B & Div.Yield", "#ddlHistoricaldivtypesubindex", "#datepickerFromDivYield", "#datepickerToDivYield", "#submit_buttonDivdata", "#exporthistoricaldiv"),
     new ReportSelectors("Historical Data",      "#ddlHistoricalsubindex",        "#datepickerFrom",         "#datepickerTo",         "#submit_button",        "#exporthistorical"),
-    new ReportSelectors("VIX Data",             "#ddlHistoricalvixsubindex",     "#datepickerFromvixdata",  "#datepickerTovixdata",  "#submit_buttonvixdata", "#exporthistoricalvix"),
+    new ReportSelectors("VIX Data",             "#ddlHistoricalvixsubindex",    
+  "#datepickerFromvixdata",  "#datepickerTovixdata",  "#submit_buttonvixdata", "#exporthistoricalvix"),
     new ReportSelectors("Total Index",          "#ddlHistoricaltotalsubindex",   "#datepickerFromtotalindex","#datepickerTototalindex","#submit_totalindexhistorical", "#exportTotalindex")
 };
 
 var downloadsPath = @"D:\MarketData\NseDownloads";
 
-var startDate = DateTime.ParseExact(START_DATE, "dd-MM-yyyy", null);
+string startDateStr = $"01-01-{START_YEAR}";
+var startDate = DateTime.ParseExact(startDateStr, "dd-MM-yyyy", null);
 var endDate   = DateTime.ParseExact(END_DATE,   "dd-MM-yyyy", null);
 
 // Build date chunks
@@ -63,11 +65,10 @@ while (cursor <= endDate)
     var chunkEnd = cursor.AddMonths(CHUNK_MONTHS).AddDays(-1);
     if (chunkEnd > endDate) chunkEnd = endDate;
     chunks.Add((cursor, chunkEnd));
-
     cursor = chunkEnd.AddDays(1);
 }
 
-Console.WriteLine($"Range   : {START_DATE} to {END_DATE}");
+Console.WriteLine($"Range   : {startDateStr} to {END_DATE}");
 Console.WriteLine($"Chunks  : {chunks.Count} x {CHUNK_MONTHS}-month slices");
 Console.WriteLine($"Indices : {INDEX_NAMES.Count}");
 Console.WriteLine($"Output  : {downloadsPath}");
@@ -106,7 +107,6 @@ try
 {
     await page.GotoAsync("https://niftyindices.com/reports/historical-data",
         new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 15_000 });
-
 }
 catch (TimeoutException)
 {
@@ -128,7 +128,6 @@ Console.ReadLine();
 
 // ── Step 1.5: Auto-detect active report type based on visible elements ────────
 Console.Write("Auto-detecting active report type... ");
-
 ReportSelectors activeSelectors = null;
 foreach (var report in KNOWN_REPORTS)
 {
@@ -148,14 +147,12 @@ if (activeSelectors == null)
 {
     Console.WriteLine("FAILED");
     Console.Error.WriteLine("ERROR: Could not detect the active report type. Did you select one in the browser?");
-
     return;
 }
 Console.WriteLine($"Detected '{activeSelectors.Name}'");
 
 // ── Step 2: Smart Auto-detect the Sub-Index Dropdown ──────────────────────────
 Console.Write("Locating Sub-Index dropdown... ");
-
 // Extract unique sub-index categories from the JSON config
 var uniqueSubIndices = INDEX_NAMES
     .Select(x => x.SubIndex)
@@ -183,11 +180,9 @@ var subIndexDetection = await page.EvaluateAsync<JsonElement>($@"(subs) => {{
                 selector: select.id ? '#' + select.id : null,
                 options: optionTexts.filter(o => o && o !== '0' && !o.toLowerCase().includes('select'))
             }};
-
         }}
     }}
     return {{ found: false }};
-
 }}", uniqueSubIndices);
 
 bool hasSubIndexDropdown = subIndexDetection.TryGetProperty("found", out var f) && f.GetBoolean();
@@ -215,7 +210,6 @@ else
     hasSubIndexDropdown = await page.EvaluateAsync<bool>($@"() => {{
         const el = document.querySelector('{activeSelectors.SubIndexDropdown}');
         return el && el.offsetParent !== null;
-
     }}");
     
     if (hasSubIndexDropdown)
@@ -225,7 +219,6 @@ else
             return Array.from(select.options)
                 .filter(o => o.value && o.value !== '0' && !o.text.toLowerCase().includes('select'))
                 .map(o => o.textContent.trim());
-    
         }}", activeSelectors.SubIndexDropdown);
     }
     else
@@ -252,88 +245,75 @@ foreach (var currentCategory in subIndexUIOptions)
             .ToList();
 
         if (targetIndices.Count == 0)
-            continue;
-
-        // Skip this category, we have nothing to download here.
+            continue; // Skip this category, we have nothing to download here.
 
         Console.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         Console.WriteLine($"  CATEGORY: {currentCategory}  ({targetIndices.Count} indices)");
         Console.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
         Console.Write($"  Changing UI to '{currentCategory}' ... ");
 
         // Set up the AJAX listener to wait for the Index Name dropdown to populate
         var ajaxCompleted = new TaskCompletionSource<bool>();
-
         EventHandler<IResponse> responseHandler = (_, response) =>
         {
             if (response.Url.Contains("Backpage.aspx") && response.Status == 200)
                 ajaxCompleted.TrySetResult(true);
-
         };
         page.Response += responseHandler;
 
         var selectedCategory = await SelectDropdownByText(page, currentCategory, activeSubIndexSelector);
-
+        
         if (!selectedCategory)
         {
             Console.WriteLine("FAILED — could not select category in UI. Skipping.");
-
             page.Response -= responseHandler;
             Console.WriteLine();
             continue;
         }
 
-        try { await Task.WhenAny(ajaxCompleted.Task, Task.Delay(10_000));
-
+        try 
+        { 
+            await Task.WhenAny(ajaxCompleted.Task, Task.Delay(10_000));
         }
-        finally { page.Response -= responseHandler;
-
+        finally 
+        { 
+            page.Response -= responseHandler;
         }
 
-        await page.WaitForTimeoutAsync(1000);
-
-        // DOM buffer
+        await page.WaitForTimeoutAsync(1000); // DOM buffer
         Console.WriteLine("done.\n");
-
     }
     else
     {
-        targetIndices = INDEX_NAMES;
-
-        // Flat mode
+        targetIndices = INDEX_NAMES; // Flat mode
         Console.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         Console.WriteLine($"  PROCESSING ALL INDICES  ({targetIndices.Count})");
         Console.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
     }
 
     // ── Download loop for the filtered indices in this category ───────────────
     for (int idx = 0; idx < targetIndices.Count; idx++)
     {
         var indexName = targetIndices[idx].Name;
-
         Console.Write($"  [{idx + 1}/{targetIndices.Count}]  {indexName}  -  Selecting '{indexName}' ... ");
 
         // Find the index in ANY visible dropdown (auto-discovery)
         var selected = await SelectDropdownByText(page, indexName, null);
-
         if (!selected)
         {
             Console.WriteLine("FAILED — option not found. Skipping.");
-
             continue;
         }
+        
         await page.WaitForTimeoutAsync(600);
         Console.WriteLine("done.");
-
+        
         int success = 0, skipped = 0, failed = 0;
         var safeFileName = MakeSafeFileName(indexName);
 
         for (int i = 0; i < chunks.Count; i++)
         {
             var (from, to) = chunks[i];
-
             var fromStr    = from.ToString("dd-MM-yyyy");
             var toStr      = to.ToString("dd-MM-yyyy");
 
@@ -342,59 +322,58 @@ foreach (var currentCategory in subIndexUIOptions)
             try
             {
                 await SetDate(page, activeSelectors.From, fromStr);
-
                 await SetDate(page, activeSelectors.To,   toStr);
                 await page.WaitForTimeoutAsync(500);
 
                 var ajaxCompleted = new TaskCompletionSource<bool>();
-
                 EventHandler<IResponse> responseHandler = (_, response) =>
                 {
                     if (response.Url.Contains("Backpage.aspx") && response.Status == 200)
                         ajaxCompleted.TrySetResult(true);
-
                 };
                 page.Response += responseHandler;
 
                 await JsClick(page, activeSelectors.Submit);
 
-                try { await Task.WhenAny(ajaxCompleted.Task, Task.Delay(15_000));
-
+                try 
+                { 
+                    await Task.WhenAny(ajaxCompleted.Task, Task.Delay(15_000));
                 }
-                finally { page.Response -= responseHandler;
-
+                finally 
+                { 
+                    page.Response -= responseHandler;
                 }
 
                 await page.WaitForTimeoutAsync(500);
-
                 var csvVisible = await page.IsVisibleAsync(activeSelectors.Csv);
 
                 if (!csvVisible)
                 {
                     Console.WriteLine("Skipped (no data for this period)");
-
                     skipped++;
                     if (i < chunks.Count - 1)
                         await page.WaitForTimeoutAsync(DELAY_MS);
-
                     continue;
                 }
 
                 var dlTask = page.WaitForDownloadAsync(new() { Timeout = 15_000 });
-
                 await JsClick(page, activeSelectors.Csv);
                 var dl = await dlTask;
 
-                var filename = $"{safeFileName}_{fromStr.Replace("-", "")}_{toStr.Replace("-", "")}.csv";
-                await dl.SaveAsAsync(Path.Combine(downloadsPath, filename));
-                Console.WriteLine($"Saved: {filename}");
+                string reportSuffix = activeSelectors.Name.Contains("P/E") ? "PE" : "Price";
+                string yearStr = to.ToString("yyyy");
+                var filename = $"{safeFileName}_{reportSuffix}_{yearStr}.csv";
+                
+                string targetFolder = Path.Combine(downloadsPath, reportSuffix);
+                Directory.CreateDirectory(targetFolder); // Automatically creates the folder if it doesn't exist
+                
+                await dl.SaveAsAsync(Path.Combine(targetFolder, filename));
+                Console.WriteLine($"Saved: {reportSuffix}\\{filename}");
                 success++;
-
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"FAILED: {ex.Message}");
-
                 failed++;
                 await page.WaitForTimeoutAsync(DELAY_MS * 2);
                 continue;
@@ -402,13 +381,11 @@ foreach (var currentCategory in subIndexUIOptions)
 
             if (i < chunks.Count - 1)
                 await page.WaitForTimeoutAsync(DELAY_MS);
-
         }
 
         totalSuccess += success;
         totalSkipped += skipped;
         totalFailed  += failed;
-
     }
     Console.WriteLine();
 }
@@ -416,10 +393,8 @@ foreach (var currentCategory in subIndexUIOptions)
 // ── Grand summary ─────────────────────────────────────────────────────────────
 Console.WriteLine("════════════════════════════════════════════════════");
 Console.WriteLine($"  ALL DONE — {INDEX_NAMES.Count} total indices processed");
-
 Console.WriteLine($"  Total saved   : {totalSuccess}");
 Console.WriteLine($"  Total skipped : {totalSkipped}  (no data for period)");
-
 Console.WriteLine($"  Total failed  : {totalFailed}");
 Console.WriteLine($"  Folder        : {downloadsPath}");
 Console.WriteLine("════════════════════════════════════════════════════");
@@ -455,20 +430,16 @@ static async Task<bool> SelectDropdownByText(IPage page, string optionText, stri
             if (option) {
                 select.value = option.value;
 
- 
                if (typeof jQuery !== 'undefined') {
                     jQuery(select).val(option.value).trigger('change');
                 } else {
                     select.dispatchEvent(new Event('input',  { bubbles: true }));
-
                     select.dispatchEvent(new Event('change', { bubbles: true }));
                 }
                 return true;
-
             }
         }
         return false;
-
     }", new { text = optionText, specificSel = specificSelector });
 }
 
@@ -484,8 +455,7 @@ static async Task SetDate(IPage page, string selector, string value)
         const id  = sel.replace('#', '');
 
         if (typeof jQuery !== 'undefined' && jQuery('#' + id).datepicker) {{
-    
-        try {{
+            try {{
                 jQuery('#' + id).datepicker('setDate', new Date({year}, {month} - 1, {day}));
                 return;
             }} catch(e) {{}}
@@ -499,7 +469,6 @@ static async Task SetDate(IPage page, string selector, string value)
         el.dispatchEvent(new Event('input',  {{ bubbles: true }}));
         el.dispatchEvent(new Event('change', {{ bubbles: true }}));
         el.dispatchEvent(new Event('blur',   {{ bubbles: true }}));
-
     }}");
 }
 
