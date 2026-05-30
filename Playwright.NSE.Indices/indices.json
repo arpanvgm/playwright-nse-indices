@@ -224,7 +224,7 @@
     "name": "NIFTY500 HEALTHCARE",
     "subIndex": "Sectoral Indices",
     "enabled": true
-  }
+  },
 
 
 
@@ -453,7 +453,7 @@
     "name": "NIFTY500 VALUE 50",
     "subIndex": "Strategy Indices",
     "enabled": false
-  }
+  },
 
 
 
