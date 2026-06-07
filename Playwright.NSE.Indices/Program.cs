@@ -55,10 +55,9 @@ Console.WriteLine($"Output  : {settings.DownloadsPath}");
 Console.WriteLine($"Log     : {logger.LogFilePath}");
 Console.WriteLine();
 
-logger.LogOnly($"Range   : {startDate:dd-MM-yyyy} to {endDate:dd-MM-yyyy}");
-logger.LogOnly($"Chunks  : {chunks.Count} x {settings.ChunkMonths}-month slices");
-logger.LogOnly($"Indices : {indexNames.Count}");
-logger.LogOnly($"Output  : {settings.DownloadsPath}");
+logger.Info($"Range    : {startDate:dd-MM-yyyy} to {endDate:dd-MM-yyyy}");
+logger.Info($"Chunks   : {chunks.Count} x {settings.ChunkMonths}-month slices");
+logger.Info($"Indices  : {indexNames.Count}");
 
 // ── Launch browser ────────────────────────────────────────────────────────────
 using var playwright = await Microsoft.Playwright.Playwright.CreateAsync();
@@ -73,9 +72,6 @@ await using (context)
     var page = await context.NewPageAsync();
     await BrowserFactory.BlockHeavyAssetsAsync(page);
 
-    Console.WriteLine("Opening page...");
-    logger.LogOnly("Opening page: https://niftyindices.com/reports/historical-data");
-
     try
     {
         await page.GotoAsync("https://niftyindices.com/reports/historical-data",
@@ -86,7 +82,6 @@ await using (context)
         // Third-party analytics scripts hang — page content is ready, continue
     }
     Console.WriteLine("Page loaded.");
-    logger.LogOnly("Page loaded.");
 
     // ── Step 1: manual dropdown selection ────────────────────────────────────
     Console.WriteLine();
@@ -99,7 +94,6 @@ await using (context)
     Console.WriteLine("║  Press ENTER when dropdowns 1–2 are set.       ║");
     Console.WriteLine("╚════════════════════════════════════════════════╝");
     Console.ReadLine();
-    logger.LogOnly("User confirmed manual dropdown selection.");
 
     // ── Step 1.5: auto-detect active report type ──────────────────────────────
     Console.Write("Auto-detecting active report type... ");
@@ -108,12 +102,12 @@ await using (context)
     if (activeSelectors == null)
     {
         Console.WriteLine("FAILED");
-        logger.Error("ERROR: Could not detect the active report type. Did you select one in the browser?");
         Console.Error.WriteLine("ERROR: Could not detect the active report type. Did you select one in the browser?");
+        logger.Error("Could not detect active report type — run aborted");
         return;
     }
     Console.WriteLine($"Detected '{activeSelectors.Name}'");
-    logger.LogOnly($"Detected report type: '{activeSelectors.Name}'");
+    logger.Info($"Report   : {activeSelectors.Name}");
 
     // ── Step 2: auto-detect sub-index dropdown ────────────────────────────────
     Console.Write("Locating Sub-Index dropdown... ");
@@ -126,19 +120,18 @@ await using (context)
     var subIndexResult = await ReportDetector.DetectSubIndexDropdownAsync(
         page, activeSelectors, uniqueSubIndices);
 
-    string           activeSubIndexSelector = subIndexResult.ActiveSelector;
-    List<string>     subIndexUIOptions      = subIndexResult.Options;
-    bool             hasSubIndexDropdown    = subIndexResult.Found;
+    string       activeSubIndexSelector = subIndexResult.ActiveSelector;
+    List<string> subIndexUIOptions      = subIndexResult.Options;
+    bool         hasSubIndexDropdown    = subIndexResult.Found;
 
     if (hasSubIndexDropdown)
     {
         Console.WriteLine($"Found ({activeSubIndexSelector})");
-        logger.LogOnly($"Sub-index dropdown found: {activeSubIndexSelector}");
     }
     else
     {
         Console.WriteLine("Not found. (Will process all indices flatly)");
-        logger.Warn("Sub-index dropdown not found. Running in flat mode.");
+        logger.Warn("Sub-index dropdown not found — running in flat mode");
     }
     Console.WriteLine();
 
@@ -158,22 +151,20 @@ await using (context)
     await orchestrator.RunAsync();
 
     // ── Grand summary ─────────────────────────────────────────────────────────
-    var summary = new[]
-    {
-        "════════════════════════════════════════════════════",
-        $"  ALL DONE — {indexNames.Count} total indices processed",
-        $"  Total saved   : {orchestrator.TotalSuccess}",
-        $"  Total skipped : {orchestrator.TotalSkipped}  (no data for period)",
-        $"  Total failed  : {orchestrator.TotalFailed}",
-        $"  Folder        : {settings.DownloadsPath}",
-        "════════════════════════════════════════════════════"
-    };
+    Console.WriteLine("════════════════════════════════════════════════════");
+    Console.WriteLine($"  ALL DONE — {indexNames.Count} total indices processed");
+    Console.WriteLine($"  Total saved   : {orchestrator.TotalSuccess}");
+    Console.WriteLine($"  Total skipped : {orchestrator.TotalSkipped}  (no data for period)");
+    Console.WriteLine($"  Total failed  : {orchestrator.TotalFailed}");
+    Console.WriteLine($"  Folder        : {settings.DownloadsPath}");
+    Console.WriteLine("════════════════════════════════════════════════════");
 
-    foreach (var line in summary)
-    {
-        Console.WriteLine(line);
-        logger.LogOnly(line);
-    }
+    logger.Info("---");
+    logger.Info($"Saved   : {orchestrator.TotalSuccess}");
+    logger.Info($"Skipped : {orchestrator.TotalSkipped}");
+    logger.Info($"Failed  : {orchestrator.TotalFailed}");
+    if (orchestrator.ServerUnresponsiveDetected)
+        logger.Warn("Run stopped early — server was unresponsive");
 
     Console.WriteLine();
     Console.WriteLine("Press any key to close the browser...");
