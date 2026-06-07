@@ -150,6 +150,9 @@ The tool takes over completely. For each enabled index and date chunk it:
 
 **4. Press any key to close the browser**
 
+> If the server becomes unresponsive mid-run, the tool detects this automatically,
+> stops the run cleanly, and prints a warning. No manual intervention needed.
+
 ---
 
 ## Output files
@@ -197,13 +200,19 @@ Just wait briefly — it will proceed.
 
 **A chunk shows "Skipped (no data for this period)"**
 
-The site returned no data for that date range (e.g. the index did not exist yet).
+The site responded but returned no data for that date range (e.g. the index did not exist yet).
 This is expected for early dates. The loop continues automatically.
 
 **A chunk shows "FAILED"**
 
 An exception occurred (network error, page crash, download timeout).
 The loop continues to the next chunk. Check the `.log` file for the full exception detail.
+
+**The run stops early with "AJAX timeout — server unresponsive"**
+
+The server did not respond within 15 seconds. This means the site is down or rate-limiting
+requests — not that data is missing. The run stops immediately and the browser closes cleanly.
+Simply restart the tool when the server recovers. No data is silently skipped in this scenario.
 
 **Dropdowns load slowly**
 
