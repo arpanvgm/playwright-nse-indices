@@ -22,7 +22,7 @@ This tool lets you **select your base report once manually**, then automatically
 ### 1. Clone the repository
 
 ~~~powershell
-git clone [https://github.com/your-username/your-repo-name.git](https://github.com/your-username/your-repo-name.git)
+git clone https://github.com/your-username/your-repo-name.git
 cd your-repo-name
 ~~~
 
@@ -32,11 +32,9 @@ cd your-repo-name
 dotnet restore
 ~~~
 
-This installs `Microsoft.Playwright` v1.59.0 as defined in the `.csproj` file.
-
 ### 3. Install Playwright browser drivers
 
-Playwright needs browser binaries (Chromium, Firefox, WebKit) downloaded locally.
+Playwright needs browser binaries downloaded locally.
 Run these **once** after cloning:
 
 ~~~powershell
@@ -66,32 +64,33 @@ Downloading FFmpeg ...
 
 ## Configuration
 
-### 1. Script Parameters (`Program.cs`)
-Open `Program.cs` and edit the **4 lines** at the top before running:
+### 1. appsettings.json
 
-~~~csharp
-const int    START_YEAR   = 2015;
-// Starts on 1st January of this year
-string END_DATE           = DateTime.Now.ToString("dd-MM-yyyy");
-// runtime — today's date
-const int    CHUNK_MONTHS = 12;
-// Months per download chunk (12 = yearly)
-const int    DELAY_MS     = 4000;
-// Pause between downloads   (milliseconds)
+All runtime parameters are configured in `appsettings.json` at the project root.
+Edit this file before running — no need to touch any `.cs` files:
+
+~~~json
+{
+  "DownloadsPath": "D:\\MarketData\\NseDownloads",
+  "StartYear": 1996,
+  "EndDate": "",
+  "ChunkMonths": 12,
+  "DelayMs": 4000
+}
 ~~~
 
-### What is DELAY_MS?
-A polite pause between each download request so you are not hammering the server.
-`4000` (4 seconds) works well for normal use. Increase to `6000`–`8000` if you experience mid-run failures on large date ranges.
-
-### What is CHUNK_MONTHS?
-The site rejects date ranges that are too large.
-The tool splits your full date range into smaller chunks of this many months each.
-`12` (one year per request) works reliably. Reduce to `6` or `3` if the site starts rejecting requests.
+| Setting | Description | Default |
+|---|---|---|
+| `DownloadsPath` | Root folder where downloaded CSVs are saved | `D:\MarketData\NseDownloads` |
+| `StartYear` | Download history starts on 1st January of this year | `1996` |
+| `EndDate` | Last date to download (`dd-MM-yyyy`). Leave blank to use today's date | *(blank = today)* |
+| `ChunkMonths` | Number of months per download chunk. Reduce to `6` or `3` if the site rejects requests | `12` |
+| `DelayMs` | Polite pause between download requests (milliseconds). Increase to `6000`–`8000` for large runs | `4000` |
 
 ### 2. Index Configuration (`indices.json`)
+
 The tool dynamically reads the indices you want to download from `indices.json`.
-You can easily skip certain indices by setting `"enabled": false` without having to delete them from the file:
+Disable an index without deleting it by setting `"enabled": false`:
 
 ~~~json
 [
@@ -107,20 +106,6 @@ You can easily skip certain indices by setting `"enabled": false` without having
   }
 ]
 ~~~
-
----
-
-### Switching report types
-
-The selectors at the top of `Program.cs` are pre-configured for **P/E, P/B & Div.Yield**.
-To download a different report type, change the four selector constants:
-
-| Report Type | FROM_SEL | TO_SEL | SUBMIT_SEL | CSV_SEL |
-|---|---|---|---|---|
-| P/E, P/B & Div.Yield *(default)* | `#datepickerFromDivYield` | `#datepickerToDivYield` | `#submit_buttonDivdata` | `#exporthistoricaldiv` |
-| Historical Data | `#datepickerFrom` | `#datepickerTo` | `#submit_button` | `#exporthistorical` |
-| VIX Data | `#datepickerFromvixdata` | `#datepickerTovixdata` | `#submit_buttonvixdata` | `#exporthistoricalvix` |
-| Total Index | `#datepickerFromtotalindex` | `#datepickerTototalindex` | `#submit_totalindexhistorical` | `#exportTotalindex` |
 
 ---
 
@@ -163,13 +148,16 @@ The tool takes over completely. For each enabled index and date chunk it:
 - Clicks the CSV download link
 - Saves the file to the output folder
 
-**4. Press ENTER to close the browser**
+**4. Press any key to close the browser**
+
+> If the server becomes unresponsive mid-run, the tool detects this automatically,
+> stops the run cleanly, and prints a warning. No manual intervention needed.
 
 ---
 
 ## Output files
 
-Downloaded CSVs are saved to subfolders based on the report type inside the configured output folder (default `D:\MarketData\NseDownloads`).
+Downloaded CSVs are saved to subfolders based on the report type inside the configured `DownloadsPath`.
 File naming format: `IndexName_ReportType_YYYY.csv`
 
 Example:
@@ -185,22 +173,50 @@ NseDownloads/
 
 ---
 
+## Log files
+
+Each run produces a timestamped log file in the application folder (next to the `.exe`):
+
+~~~text
+run_20260607_143022.log
+~~~
+
+The log file records the same output as the console, plus:
+- Timestamps on every line
+- `[ERROR]` tag with exception details for failures
+- `[WARN]` tag for unexpected but non-fatal conditions
+
+This makes it easy to review long unattended runs and grep for failures.
+
+---
+
 ## Troubleshooting
 
 **Page takes too long to load / timeout on startup**
 
 The site loads slowly due to third-party analytics scripts.
-The tool handles this automatically by blocking heavy assets (images, fonts, media) to speed up loading and bypassing the analytics timeout after 15 seconds.
+The tool handles this automatically by blocking heavy assets and bypassing the analytics timeout.
 Just wait briefly — it will proceed.
 
-**A chunk fails mid-run**
+**A chunk shows "Skipped (no data for this period)"**
 
-A `FAILED` line means the site returned no data for that date range (e.g. the index did not exist yet).
-This is expected for early dates. The loop continues automatically to the next chunk.
+The site responded but returned no data for that date range (e.g. the index did not exist yet).
+This is expected for early dates. The loop continues automatically.
+
+**A chunk shows "FAILED"**
+
+An exception occurred (network error, page crash, download timeout).
+The loop continues to the next chunk. Check the `.log` file for the full exception detail.
+
+**The run stops early with "AJAX timeout — server unresponsive"**
+
+The server did not respond within 15 seconds. This means the site is down or rate-limiting
+requests — not that data is missing. The run stops immediately and the browser closes cleanly.
+Simply restart the tool when the server recovers. No data is silently skipped in this scenario.
 
 **Dropdowns load slowly**
 
-If the Sub-Index dropdown is slow to populate, the tool already uses your real Edge browser with bot-detection disabled.
+The tool uses your real Edge browser with bot-detection disabled.
 If it persists, try closing other Edge windows before running.
 
 ---
@@ -209,7 +225,8 @@ If it persists, try closing other Edge windows before running.
 
 - Uses **Microsoft Playwright** to drive your real installed Edge browser (`Channel = "msedge"`)
 - Disables the `AutomationControlled` Chrome flag and masks `navigator.webdriver` so the site does not detect automation
-- Optimizes initial load times by aggressively aborting network requests for unused assets (images, fonts, media)
-- Sets dates programmatically via the **jQuery UI datepicker API** (`datepicker('setDate', ...)`) which updates the datepicker's internal state — not just the visible input text
+- Optimizes initial load by aborting network requests for unused assets (images, fonts, media)
+- Sets dates via the **jQuery UI datepicker API** (`datepicker('setDate', ...)`) which updates the datepicker's internal state — not just the visible input text
 - Clicks Submit and the CSV link via direct JavaScript (`el.click()`) to bypass Playwright's visibility requirements
 - All downloaded files are captured via Playwright's download interception and saved with descriptive filenames
+- Configuration is driven by `appsettings.json` — no code changes needed for routine parameter adjustments
