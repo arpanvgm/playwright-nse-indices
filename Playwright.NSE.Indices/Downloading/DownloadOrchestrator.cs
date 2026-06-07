@@ -7,20 +7,26 @@ namespace Playwright.NSE.Indices.Downloading;
 
 public class DownloadOrchestrator
 {
-    private readonly IPage            _page;
-    private readonly AppLogger        _logger;
-    private readonly string           _downloadsPath;
-    private readonly int              _delayMs;
-    private readonly ReportSelectors  _activeSelectors;
-    private readonly string           _activeSubIndexSelector;
-    private readonly bool             _hasSubIndexDropdown;
-    private readonly List<string>     _subIndexUIOptions;
-    private readonly List<IndexConfig> _indexNames;
+    private readonly IPage                              _page;
+    private readonly AppLogger                         _logger;
+    private readonly string                            _downloadsPath;
+    private readonly int                               _delayMs;
+    private readonly ReportSelectors                   _activeSelectors;
+    private readonly string                            _activeSubIndexSelector;
+    private readonly bool                              _hasSubIndexDropdown;
+    private readonly List<string>                      _subIndexUIOptions;
+    private readonly List<IndexConfig>                 _indexNames;
     private readonly List<(DateTime From, DateTime To)> _chunks;
 
-    public int TotalSuccess { get; private set; }
-    public int TotalSkipped { get; private set; }
-    public int TotalFailed  { get; private set; }
+    public int  TotalSuccess  { get; private set; }
+    public int  TotalSkipped  { get; private set; }
+    public int  TotalFailed   { get; private set; }
+
+    /// <summary>
+    /// Set to true when an AJAX timeout is detected mid-run.
+    /// Signals that the server is unresponsive — caller can check this after RunAsync returns.
+    /// </summary>
+    public bool ServerUnresponsiveDetected { get; private set; }
 
     public DownloadOrchestrator(
         IPage page,
@@ -116,6 +122,11 @@ public class DownloadOrchestrator
             }
 
             await ProcessIndicesAsync(targetIndices);
+
+            // Server unresponsive detected inside the chunk loop — stop all category loops
+            if (ServerUnresponsiveDetected)
+                break;
+
             Console.WriteLine();
             _logger.Separator();
         }
@@ -145,6 +156,10 @@ public class DownloadOrchestrator
             _logger.LogOnly($"  Index '{indexName}': selected successfully.");
 
             await ProcessChunksAsync(indexName);
+
+            // Propagate stop signal up to the category loop
+            if (ServerUnresponsiveDetected)
+                break;
         }
     }
 
@@ -153,8 +168,8 @@ public class DownloadOrchestrator
     private async Task ProcessChunksAsync(string indexName)
     {
         int success = 0, skipped = 0, failed = 0;
-        var safeFileName   = FileNamer.MakeSafe(indexName);
-        var reportSuffix   = FileNamer.GetReportSuffix(_activeSelectors.Name);
+        var safeFileName = FileNamer.MakeSafe(indexName);
+        var reportSuffix = FileNamer.GetReportSuffix(_activeSelectors.Name);
 
         for (int i = 0; i < _chunks.Count; i++)
         {
@@ -181,15 +196,35 @@ public class DownloadOrchestrator
 
                 await PageInteractions.JsClickAsync(_page, _activeSelectors.Submit);
 
+                // ── Race: AJAX response vs timeout ────────────────────────────
+                var timeoutTask = Task.Delay(15_000);
+                Task winner;
                 try
                 {
-                    await Task.WhenAny(ajaxCompleted.Task, Task.Delay(15_000));
+                    winner = await Task.WhenAny(ajaxCompleted.Task, timeoutTask);
                 }
                 finally
                 {
                     _page.Response -= responseHandler;
                 }
 
+                // ── Timeout path: server did not respond ──────────────────────
+                if (winner == timeoutTask)
+                {
+                    var msg = $"AJAX timeout — server unresponsive. Stopping run. " +
+                              $"({indexName} | {fromStr} to {toStr})";
+                    Console.WriteLine();
+                    Console.WriteLine($"⚠  {msg}");
+                    _logger.Warn(msg);
+
+                    ServerUnresponsiveDetected = true;
+                    TotalFailed += failed;
+                    TotalSkipped += skipped;
+                    TotalSuccess += success;
+                    return;
+                }
+
+                // ── AJAX completed path: check if data was returned ───────────
                 await _page.WaitForTimeoutAsync(500);
                 var csvVisible = await _page.IsVisibleAsync(_activeSelectors.Csv);
 
@@ -203,11 +238,12 @@ public class DownloadOrchestrator
                     continue;
                 }
 
+                // ── Data available: download ──────────────────────────────────
                 var dlTask = _page.WaitForDownloadAsync(new() { Timeout = 15_000 });
                 await PageInteractions.JsClickAsync(_page, _activeSelectors.Csv);
                 var dl = await dlTask;
 
-                var filePath = FileNamer.BuildFilePath(_downloadsPath, reportSuffix, safeFileName, to);
+                var filePath  = FileNamer.BuildFilePath(_downloadsPath, reportSuffix, safeFileName, to);
                 var fileLabel = $"{reportSuffix}\\{Path.GetFileName(filePath)}";
 
                 await dl.SaveAsAsync(filePath);
