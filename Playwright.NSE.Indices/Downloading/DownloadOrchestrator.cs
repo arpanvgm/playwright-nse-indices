@@ -123,18 +123,18 @@ public class DownloadOrchestrator
         for (int idx = 0; idx < targetIndices.Count; idx++)
         {
             var indexName = targetIndices[idx].Name;
-            Console.Write($"  [{idx + 1}/{targetIndices.Count}]  {indexName}  -  Selecting '{indexName}' ... ");
-
             var selected = await PageInteractions.SelectDropdownByTextAsync(_page, indexName, null);
             if (!selected)
             {
-                Console.WriteLine("FAILED — option not found. Skipping.");
-                _logger.Error($"Index '{indexName}': option not found in UI dropdown");
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"Fail  | UI Selection | {indexName}");
+                Console.ResetColor();
+
+                _logger.Error($"Fail  | UI Selection | {indexName}");
                 continue;
             }
 
             await _page.WaitForTimeoutAsync(600);
-            Console.WriteLine("done.");
 
             await ProcessChunksAsync(indexName);
 
@@ -157,7 +157,7 @@ public class DownloadOrchestrator
             var fromStr    = from.ToString("dd-MM-yyyy");
             var toStr      = to.ToString("dd-MM-yyyy");
 
-            Console.Write($"    [{i + 1}/{_chunks.Count}] {fromStr} to {toStr} ... ");
+    
 
             try
             {
@@ -208,7 +208,7 @@ public class DownloadOrchestrator
                 if (!csvVisible)
                 {
                     Console.WriteLine("Skipped (no data for this period)");
-                    _logger.Info($"Skipped | {indexName} | {fromStr} to {toStr}");
+                    _logger.Info($"Skip  | {fromStr} to {toStr} | {indexName}");
                     skipped++;
                     if (i < _chunks.Count - 1)
                         await _page.WaitForTimeoutAsync(_delayMs);
@@ -225,13 +225,13 @@ public class DownloadOrchestrator
 
                 await dl.SaveAsAsync(filePath);
                 Console.WriteLine($"Saved: {reportSuffix}\\{fileName}");
-                _logger.Info($"Saved  | {indexName} | {fromStr} to {toStr} | {fileName}");
+                _logger.Info($"Saved | {fromStr} to {toStr} | {fileName}");
                 success++;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"FAILED: {ex.Message}");
-                _logger.Error($"Failed | {indexName} | {fromStr} to {toStr} | {ex.Message}", ex);
+                _logger.Error($"Fail  | {fromStr} to {toStr} | {indexName}", ex);
                 failed++;
                 await _page.WaitForTimeoutAsync(_delayMs * 2);
                 continue;
