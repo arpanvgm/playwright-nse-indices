@@ -1,0 +1,14 @@
+# Folders should end with /
+bin/
+obj/
+.vs/
+.git/
+node_modules/
+dist/
+out/
+TestResults/
+*.g.cs
+*.log
+*.tmp
+
+indices.json
