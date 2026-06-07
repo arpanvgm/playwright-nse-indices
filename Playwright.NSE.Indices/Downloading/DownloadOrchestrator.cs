@@ -225,7 +225,7 @@ public class DownloadOrchestrator
                 }
 
                 // ── AJAX completed path: check if data was returned ───────────
-                await _page.WaitForTimeoutAsync(500);
+                await _page.WaitForTimeoutAsync(750);
                 var csvVisible = await _page.IsVisibleAsync(_activeSelectors.Csv);
 
                 if (!csvVisible)
