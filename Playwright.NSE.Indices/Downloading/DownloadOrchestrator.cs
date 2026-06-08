@@ -126,8 +126,6 @@ public class DownloadOrchestrator
         {
             var indexName = targetIndices[idx].Name;
 
-            // Use the report-specific index name dropdown selector to avoid
-            // accidentally matching another visible dropdown on the page.
             var selected = await PageInteractions.SelectDropdownByTextAsync(
                 _page, indexName, _activeSelectors.IndexNameDropdown);
 
@@ -194,9 +192,10 @@ public class DownloadOrchestrator
                 // ── Timeout: server did not respond ───────────────────────────
                 if (winner == timeoutTask)
                 {
-                    var msg = $"AJAX timeout — server unresponsive ({indexName} | {fromStr} to {toStr})";
-                    Console.WriteLine();
-                    Console.WriteLine($"⚠  {msg}");
+                    var msg = $"Fail  | AJAX Timeout  | {fromStr} to {toStr} | {indexName} | server unresponsive";
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine(msg);
+                    Console.ResetColor();
                     _logger.Warn(msg);
 
                     ServerUnresponsiveDetected = true;
@@ -212,7 +211,7 @@ public class DownloadOrchestrator
 
                 if (!csvVisible)
                 {
-                    Console.WriteLine("Skipped (no data for this period)");
+                    Console.WriteLine($"Skip  | {fromStr} to {toStr} | {indexName}");
                     _logger.Info($"Skip  | {fromStr} to {toStr} | {indexName}");
                     skipped++;
                     if (i < _chunks.Count - 1)
@@ -229,13 +228,17 @@ public class DownloadOrchestrator
                 var fileName = Path.GetFileName(filePath);
 
                 await dl.SaveAsAsync(filePath);
-                Console.WriteLine($"Saved: {reportSuffix}\\{fileName}");
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"Saved | {fromStr} to {toStr} | {fileName}");
+                Console.ResetColor();
                 _logger.Info($"Saved | {fromStr} to {toStr} | {fileName}");
                 success++;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"FAILED: {ex.Message}");
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"Fail  | Exception    | {fromStr} to {toStr} | {indexName} | {ex.Message}");
+                Console.ResetColor();
                 _logger.Error($"Fail  | {fromStr} to {toStr} | {indexName}", ex);
                 failed++;
                 await _page.WaitForTimeoutAsync(_delayMs * 2);
