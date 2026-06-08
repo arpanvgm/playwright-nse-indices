@@ -37,12 +37,52 @@ if (indexNames.Count == 0)
 var chunks = DateChunker.Build(startDate, endDate, settings.ChunkMonths);
 
 // ── Known report configurations ───────────────────────────────────────────────
+// Selector IDs confirmed from live DOM inspection.
+// AjaxUrlFragment: unique substring of the AJAX response URL for each report tab.
+// IndexNameDropdown: the specific <select> that holds individual index names.
+//   Using a specific selector prevents SelectDropdownByTextAsync from accidentally
+//   matching the wrong visible dropdown on the page.
 var knownReports = new[]
 {
-    new ReportSelectors("P/E, P/B & Div.Yield", "#ddlHistoricaldivtypesubindex",  "#datepickerFromDivYield",   "#datepickerToDivYield",   "#submit_buttonDivdata",        "#exporthistoricaldiv"),
-    new ReportSelectors("Historical Data",      "#ddlHistoricalsubindex",         "#datepickerFrom",           "#datepickerTo",           "#submit_button",               "#exporthistorical"),
-    new ReportSelectors("VIX Data",             "#ddlHistoricalvixsubindex",      "#datepickerFromvixdata",    "#datepickerTovixdata",    "#submit_buttonvixdata",        "#exporthistoricalvix"),
-    new ReportSelectors("Total Index",          "#ddlHistoricaltotalsubindex",    "#datepickerFromtotalindex", "#datepickerTototalindex", "#submit_totalindexhistorical", "#exportTotalindex")
+    new ReportSelectors(
+        Name:               "P/E, P/B & Div.Yield",
+        SubIndexDropdown:   "#ddlHistoricaldivtypeeSubindex",
+        IndexNameDropdown:  "#ddlHistoricaldivtypeeindex",
+        From:               "#datepickerFromDivYield",
+        To:                 "#datepickerToDivYield",
+        Submit:             "#submit_buttonDivdata",
+        Csv:                "#exporthistoricaldiv",
+        AjaxUrlFragment:    "Backpage.aspx"),
+
+    new ReportSelectors(
+        Name:               "Historical Data",
+        SubIndexDropdown:   "#ddlHistoricaltypeeSubindex",
+        IndexNameDropdown:  "#ddlHistoricaltypeeindex",
+        From:               "#datepickerFrom",
+        To:                 "#datepickerTo",
+        Submit:             "#submit_button",
+        Csv:                "#exporthistorical",
+        AjaxUrlFragment:    "Backpage.aspx"),
+
+    new ReportSelectors(
+        Name:               "VIX Data",
+        SubIndexDropdown:   "#ddlHistoricalvixsubindex",
+        IndexNameDropdown:  "#ddlHistoricalvixindex",
+        From:               "#datepickerFromvixdata",
+        To:                 "#datepickerTovixdata",
+        Submit:             "#submit_buttonvixdata",
+        Csv:                "#exporthistoricalvix",
+        AjaxUrlFragment:    "Backpage.aspx"),
+
+    new ReportSelectors(
+        Name:               "Total Index",
+        SubIndexDropdown:   "#ddlHistoricaltotalsubindex",
+        IndexNameDropdown:  "#ddlHistoricaltotalindex",
+        From:               "#datepickerFromtotalindex",
+        To:                 "#datepickerTototalindex",
+        Submit:             "#submit_totalindexhistorical",
+        Csv:                "#exportTotalindex",
+        AjaxUrlFragment:    "Backpage.aspx"),
 };
 
 // ── Start logger ──────────────────────────────────────────────────────────────

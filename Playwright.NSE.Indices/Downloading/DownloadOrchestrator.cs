@@ -17,10 +17,11 @@ public class DownloadOrchestrator
     private readonly List<string>                       _subIndexUIOptions;
     private readonly List<IndexConfig>                  _indexNames;
     private readonly List<(DateTime From, DateTime To)> _chunks;
+    private readonly string                             _ajaxUrlFragment;
 
-    public int  TotalSuccess              { get; private set; }
-    public int  TotalSkipped              { get; private set; }
-    public int  TotalFailed               { get; private set; }
+    public int  TotalSuccess               { get; private set; }
+    public int  TotalSkipped               { get; private set; }
+    public int  TotalFailed                { get; private set; }
     public bool ServerUnresponsiveDetected { get; private set; }
 
     public DownloadOrchestrator(
@@ -45,6 +46,7 @@ public class DownloadOrchestrator
         _subIndexUIOptions      = subIndexUIOptions;
         _indexNames             = indexNames;
         _chunks                 = chunks;
+        _ajaxUrlFragment        = activeSelectors.AjaxUrlFragment;
     }
 
     public async Task RunAsync()
@@ -70,7 +72,7 @@ public class DownloadOrchestrator
                 var ajaxCompleted = new TaskCompletionSource<bool>();
                 EventHandler<IResponse> responseHandler = (_, response) =>
                 {
-                    if (response.Url.Contains("Backpage.aspx") && response.Status == 200)
+                    if (response.Url.Contains(_ajaxUrlFragment) && response.Status == 200)
                         ajaxCompleted.TrySetResult(true);
                 };
                 _page.Response += responseHandler;
@@ -123,7 +125,12 @@ public class DownloadOrchestrator
         for (int idx = 0; idx < targetIndices.Count; idx++)
         {
             var indexName = targetIndices[idx].Name;
-            var selected = await PageInteractions.SelectDropdownByTextAsync(_page, indexName, null);
+
+            // Use the report-specific index name dropdown selector to avoid
+            // accidentally matching another visible dropdown on the page.
+            var selected = await PageInteractions.SelectDropdownByTextAsync(
+                _page, indexName, _activeSelectors.IndexNameDropdown);
+
             if (!selected)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
@@ -157,8 +164,6 @@ public class DownloadOrchestrator
             var fromStr    = from.ToString("dd-MM-yyyy");
             var toStr      = to.ToString("dd-MM-yyyy");
 
-    
-
             try
             {
                 await PageInteractions.SetDateAsync(_page, _activeSelectors.From, fromStr);
@@ -168,7 +173,7 @@ public class DownloadOrchestrator
                 var ajaxCompleted = new TaskCompletionSource<bool>();
                 EventHandler<IResponse> responseHandler = (_, response) =>
                 {
-                    if (response.Url.Contains("Backpage.aspx") && response.Status == 200)
+                    if (response.Url.Contains(_ajaxUrlFragment) && response.Status == 200)
                         ajaxCompleted.TrySetResult(true);
                 };
                 _page.Response += responseHandler;
@@ -220,8 +225,8 @@ public class DownloadOrchestrator
                 await PageInteractions.JsClickAsync(_page, _activeSelectors.Csv);
                 var dl = await dlTask;
 
-                var filePath  = FileNamer.BuildFilePath(_downloadsPath, reportSuffix, safeFileName, to);
-                var fileName  = Path.GetFileName(filePath);
+                var filePath = FileNamer.BuildFilePath(_downloadsPath, reportSuffix, safeFileName, to);
+                var fileName = Path.GetFileName(filePath);
 
                 await dl.SaveAsAsync(filePath);
                 Console.WriteLine($"Saved: {reportSuffix}\\{fileName}");

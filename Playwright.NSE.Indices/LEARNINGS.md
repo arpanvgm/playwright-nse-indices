@@ -16,11 +16,14 @@ The site is SPA-like: Submit triggers AJAX, data loads asynchronously. We need t
 
 ### Implementation
 
-// Set up response listener BEFORE triggering the AJAX
+// Set up response listener BEFORE triggering the AJAX.
+// Use _ajaxUrlFragment (from ReportSelectors) — NOT a hardcoded string.
+// Each report tab posts to a different endpoint; using the wrong fragment means
+// the TaskCompletionSource never fires and every chunk silently times out.
 var ajaxCompleted = new TaskCompletionSource<bool>();
 EventHandler<IResponse> responseHandler = (_, response) =>
 {
-    if (response.Url.Contains("Backpage.aspx") && response.Status == 200)
+    if (response.Url.Contains(_ajaxUrlFragment) && response.Status == 200)
         ajaxCompleted.TrySetResult(true);
 };
 page.Response += responseHandler;
@@ -157,12 +160,44 @@ deciding what the result means.
 
 ---
 
+### 7. Hardcoding AJAX URL Fragments
+
+// ❌ Wrong — only works for Historical Data tab
+if (response.Url.Contains("Backpage.aspx") && response.Status == 200)
+
+**Problem:** Each report tab posts to a different server-side endpoint. The PE tab
+(`P/E, P/B & Div.Yield`) uses a completely different URL from `Backpage.aspx`.
+Hardcoding the wrong fragment means `ajaxCompleted` never fires, the 15-second
+timeout wins every single chunk, and all chunks are silently misreported as "no data".
+
+**Result:** All chunks skip instantly (or after timeout). Zero downloads. Zero errors logged.
+
+**Rule:** Always use `_ajaxUrlFragment` sourced from `ReportSelectors.AjaxUrlFragment`.
+Never hardcode a URL fragment in `DownloadOrchestrator`.
+
+---
+
+### 8. Passing null as the Index Name Dropdown Selector
+
+// ❌ Wrong — scans ALL visible selects, hits the wrong one
+var selected = await SelectDropdownByTextAsync(page, indexName, null);
+
+**Problem:** On the PE tab there are multiple visible dropdowns. Passing `null` scans all
+of them and may match the wrong one (e.g. a category dropdown that happens to have an
+option with the same text), or fail to match at all if the index name dropdown isn't the
+first visible select encountered.
+
+**Rule:** Always pass the report-specific `IndexNameDropdown` selector from `ReportSelectors`.
+This targets exactly the right `<select>` regardless of what else is visible on the page.
+
+---
+
 ## 📍 Site Behavior: When Data Loads
 
 ### Sequence (Data Available)
 1. **User selects dates** (or program via `SetDate`)
 2. **User clicks Submit** (or program via `JsClick`)
-3. **AJAX fires** → POST to Backpage.aspx
+3. **AJAX fires** → POST to report-specific endpoint
 4. **Server responds** (1–3 seconds typically)
 5. **Page's JS processes response** → updates DOM
 6. **Data table renders** with rows
@@ -208,6 +243,57 @@ element.offsetParent === null  // element is hidden (display:none, visibility:hi
 element.offsetParent !== null  // element is visible
 
 Use this in custom JS for manual visibility checks.
+
+---
+
+## Confirmed Selector IDs by Report Tab
+
+Confirmed from live DOM inspection (DevTools → Console → querySelectorAll('select')).
+
+| Report Tab | Index Type Dropdown | Sub-Index Dropdown | Index Name Dropdown |
+|---|---|---|---|
+| P/E, P/B & Div.Yield | `#ddlHistoricaldivtypee` | `#ddlHistoricaldivtypeeSubindex` | `#ddlHistoricaldivtypeeindex` |
+| Historical Data | `#ddlHistoricaltypee` | `#ddlHistoricaltypeeSubindex` | `#ddlHistoricaltypeeindex` |
+| VIX Data | — | `#ddlHistoricalvixsubindex` | `#ddlHistoricalvixindex` |
+| Total Index | — | `#ddlHistoricaltotalsubindex` | `#ddlHistoricaltotalindex` |
+
+**Note:** The PE tab uses a completely separate set of `<select>` elements from the
+Historical Data tab. They coexist in the DOM simultaneously — the inactive tab's
+dropdowns are hidden (`offsetParent === null`). This is why the smart scanner must
+check visibility before matching options.
+
+### How to find selectors for a new report tab
+
+Run this in DevTools Console after selecting the report tab manually:
+
+~~~javascript
+Array.from(document.querySelectorAll('select'))
+    .filter(s => s.offsetParent !== null)
+    .forEach(s => console.log(s.id, Array.from(s.options).map(o => o.textContent.trim())));
+~~~
+
+---
+
+## AJAX URL Fragments by Report Type
+
+Each report tab posts to a different server-side endpoint. Using the wrong
+URL fragment means the AJAX listener never fires, the timeout wins every time,
+and every chunk is silently misreported as "no data".
+
+| Report Tab | AjaxUrlFragment |
+|---|---|
+| P/E, P/B & Div.Yield | `Backpage.aspx` |
+| Historical Data | `Backpage.aspx` |
+| VIX Data | `Backpage.aspx` |
+| Total Index | `Backpage.aspx` |
+
+These values live in `Program.cs` inside the `knownReports` array.
+
+**How to find the correct fragment for a new report type:**
+1. Open Edge DevTools → Network tab
+2. Manually select an index, set dates, and click Submit
+3. Watch for the XHR/Fetch request that returns the data (status 200, not a static asset)
+4. Copy a unique substring from that request URL and use it as `AjaxUrlFragment`
 
 ---
 
@@ -377,6 +463,8 @@ page.Response += async (_, response) =>
 | **DOMContentLoaded instead of Load** | Third-party scripts don't block |
 | **Mask webdriver and AutomationControlled** | Site treats you like a human user |
 | **Task.WhenAny for racing conditions** | Resolves quickly without timeout waste |
+| **Never hardcode AJAX URL fragments** | Each report tab has its own endpoint; use `ReportSelectors.AjaxUrlFragment` |
+| **Always pass IndexNameDropdown to SelectDropdownByTextAsync** | Prevents matching wrong visible dropdown on page |
 
 ---
 
@@ -390,6 +478,8 @@ page.Response += async (_, response) =>
 ✅ jQuery datepicker API for date setting
 ✅ DOMContentLoaded with TimeoutException catch
 ✅ Real Edge browser with anti-bot flags masked
+✅ Per-report IndexNameDropdown selector (prevents wrong dropdown selection)
+✅ Per-report AjaxUrlFragment (prevents silent timeout-as-no-data misreporting)
 
 ---
 
@@ -403,3 +493,5 @@ page.Response += async (_, response) =>
 ❌ ClickAsync on off-screen elements
 ❌ Bundled Chromium without anti-bot fixes
 ❌ Task.WhenAny without checking the winner (silent server failures)
+❌ Hardcoded "Backpage.aspx" URL fragment (wrong for PE tab, silent failure)
+❌ null selector for index name dropdown (matches wrong visible select on PE tab)
