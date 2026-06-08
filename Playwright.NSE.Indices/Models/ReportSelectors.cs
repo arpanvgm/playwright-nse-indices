@@ -2,6 +2,8 @@
 
 public record ReportSelectors(
     string Name,
+    string SectionSelector,
+    string IndexTypeDropdown,
     string SubIndexDropdown,
     string IndexNameDropdown,
     string From,

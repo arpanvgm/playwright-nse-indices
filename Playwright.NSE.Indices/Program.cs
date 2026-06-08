@@ -37,25 +37,17 @@ if (indexNames.Count == 0)
 var chunks = DateChunker.Build(startDate, endDate, settings.ChunkMonths);
 
 // ── Known report configurations ───────────────────────────────────────────────
-// Selector IDs confirmed from live DOM inspection.
-// AjaxUrlFragment: unique substring of the AJAX response URL for each report tab.
-// IndexNameDropdown: the specific <select> that holds individual index names.
-//   Using a specific selector prevents SelectDropdownByTextAsync from accidentally
-//   matching the wrong visible dropdown on the page.
-var knownReports = new[]
+// SectionSelector  : the LI element that activates the report section in the UI.
+// IndexTypeDropdown: dropdown 1 — "Select an Index Type" (value = "Equity").
+// SubIndexDropdown : dropdown 2 — "Select a Sub-IndexType".
+// IndexNameDropdown: dropdown 3 — "Select an Index".
+// All selector IDs confirmed from live DOM inspection.
+var reportsToRun = new[]
 {
     new ReportSelectors(
-        Name:               "P/E, P/B & Div.Yield",
-        SubIndexDropdown:   "#ddlHistoricaldivtypeeSubindex",
-        IndexNameDropdown:  "#ddlHistoricaldivtypeeindex",
-        From:               "#datepickerFromDivYield",
-        To:                 "#datepickerToDivYield",
-        Submit:             "#submit_buttonDivdata",
-        Csv:                "#exporthistoricaldiv",
-        AjaxUrlFragment:    "Backpage.aspx"),
-
-    new ReportSelectors(
         Name:               "Historical Data",
+        SectionSelector:    "li.form1",
+        IndexTypeDropdown:  "#ddlHistoricaltypee",
         SubIndexDropdown:   "#ddlHistoricaltypeeSubindex",
         IndexNameDropdown:  "#ddlHistoricaltypeeindex",
         From:               "#datepickerFrom",
@@ -65,23 +57,15 @@ var knownReports = new[]
         AjaxUrlFragment:    "Backpage.aspx"),
 
     new ReportSelectors(
-        Name:               "VIX Data",
-        SubIndexDropdown:   "#ddlHistoricalvixsubindex",
-        IndexNameDropdown:  "#ddlHistoricalvixindex",
-        From:               "#datepickerFromvixdata",
-        To:                 "#datepickerTovixdata",
-        Submit:             "#submit_buttonvixdata",
-        Csv:                "#exporthistoricalvix",
-        AjaxUrlFragment:    "Backpage.aspx"),
-
-    new ReportSelectors(
-        Name:               "Total Index",
-        SubIndexDropdown:   "#ddlHistoricaltotalsubindex",
-        IndexNameDropdown:  "#ddlHistoricaltotalindex",
-        From:               "#datepickerFromtotalindex",
-        To:                 "#datepickerTototalindex",
-        Submit:             "#submit_totalindexhistorical",
-        Csv:                "#exportTotalindex",
+        Name:               "P/E, P/B & Div.Yield",
+        SectionSelector:    "li.form4",
+        IndexTypeDropdown:  "#ddlHistoricaldivtypee",
+        SubIndexDropdown:   "#ddlHistoricaldivtypeeSubindex",
+        IndexNameDropdown:  "#ddlHistoricaldivtypeeindex",
+        From:               "#datepickerFromDivYield",
+        To:                 "#datepickerToDivYield",
+        Submit:             "#submit_buttonDivdata",
+        Csv:                "#exporthistoricaldiv",
         AjaxUrlFragment:    "Backpage.aspx"),
 };
 
@@ -91,6 +75,7 @@ using var logger = new AppLogger();
 Console.WriteLine($"Range   : {startDate:dd-MM-yyyy} to {endDate:dd-MM-yyyy}");
 Console.WriteLine($"Chunks  : {chunks.Count} x {settings.ChunkMonths}-month slices");
 Console.WriteLine($"Indices : {indexNames.Count}");
+Console.WriteLine($"Reports : {reportsToRun.Length} ({string.Join(", ", reportsToRun.Select(r => r.Name))})");
 Console.WriteLine($"Output  : {settings.DownloadsPath}");
 Console.WriteLine($"Log     : {logger.LogFilePath}");
 Console.WriteLine();
@@ -98,6 +83,7 @@ Console.WriteLine();
 logger.Info($"Range    : {startDate:dd-MM-yyyy} to {endDate:dd-MM-yyyy}");
 logger.Info($"Chunks   : {chunks.Count} x {settings.ChunkMonths}-month slices");
 logger.Info($"Indices  : {indexNames.Count}");
+logger.Info($"Reports  : {string.Join(", ", reportsToRun.Select(r => r.Name))}");
 
 // ── Launch browser ────────────────────────────────────────────────────────────
 using var playwright = await Microsoft.Playwright.Playwright.CreateAsync();
@@ -122,90 +108,124 @@ await using (context)
         // Third-party analytics scripts hang — page content is ready, continue
     }
     Console.WriteLine("Page loaded.");
-
-    // ── Step 1: manual dropdown selection ────────────────────────────────────
-    Console.WriteLine();
-    Console.WriteLine("╔════════════════════════════════════════════════╗");
-    Console.WriteLine("║  Select the first 2 dropdowns in the browser:  ║");
-    Console.WriteLine("║   1. Report Type  (e.g. Historical Data)       ║");
-    Console.WriteLine("║   2. Index Type   (e.g. Equity)                ║");
-    Console.WriteLine("║                                                ║");
-    Console.WriteLine("║  Do NOT touch the Sub-Index or date fields.    ║");
-    Console.WriteLine("║  Press ENTER when dropdowns 1–2 are set.       ║");
-    Console.WriteLine("╚════════════════════════════════════════════════╝");
-    Console.ReadLine();
-
-    // ── Step 1.5: auto-detect active report type ──────────────────────────────
-    Console.Write("Auto-detecting active report type... ");
-    var activeSelectors = await ReportDetector.DetectActiveReportAsync(page, knownReports);
-
-    if (activeSelectors == null)
-    {
-        Console.WriteLine("FAILED");
-        Console.Error.WriteLine("ERROR: Could not detect the active report type. Did you select one in the browser?");
-        logger.Error("Could not detect active report type — run aborted");
-        return;
-    }
-    Console.WriteLine($"Detected '{activeSelectors.Name}'");
-    logger.Info($"Report   : {activeSelectors.Name}");
-
-    // ── Step 2: auto-detect sub-index dropdown ────────────────────────────────
-    Console.Write("Locating Sub-Index dropdown... ");
-    var uniqueSubIndices = indexNames
-        .Select(x => x.SubIndex)
-        .Where(x => !string.IsNullOrWhiteSpace(x))
-        .Distinct()
-        .ToList();
-
-    var subIndexResult = await ReportDetector.DetectSubIndexDropdownAsync(
-        page, activeSelectors, uniqueSubIndices);
-
-    string       activeSubIndexSelector = subIndexResult.ActiveSelector;
-    List<string> subIndexUIOptions      = subIndexResult.Options;
-    bool         hasSubIndexDropdown    = subIndexResult.Found;
-
-    if (hasSubIndexDropdown)
-    {
-        Console.WriteLine($"Found ({activeSubIndexSelector})");
-    }
-    else
-    {
-        Console.WriteLine("Not found. (Will process all indices flatly)");
-        logger.Warn("Sub-index dropdown not found — running in flat mode");
-    }
     Console.WriteLine();
 
-    // ── Main download loop ────────────────────────────────────────────────────
-    var orchestrator = new DownloadOrchestrator(
-        page,
-        logger,
-        settings.DownloadsPath,
-        settings.DelayMs,
-        activeSelectors,
-        activeSubIndexSelector,
-        hasSubIndexDropdown,
-        subIndexUIOptions,
-        indexNames,
-        chunks);
+    // ── Totals across all reports ─────────────────────────────────────────────
+    int grandSuccess = 0, grandSkipped = 0, grandFailed = 0;
 
-    await orchestrator.RunAsync();
+    // ── Outer loop: one iteration per report type ─────────────────────────────
+    foreach (var report in reportsToRun)
+    {
+        Console.WriteLine($"╔════════════════════════════════════════════════════╗");
+        Console.WriteLine($"║  REPORT: {report.Name,-42}║");
+        Console.WriteLine($"╚════════════════════════════════════════════════════╝");
 
-    // ── Grand summary ─────────────────────────────────────────────────────────
-    Console.WriteLine("════════════════════════════════════════════════════");
-    Console.WriteLine($"  ALL DONE — {indexNames.Count} total indices processed");
-    Console.WriteLine($"  Total saved   : {orchestrator.TotalSuccess}");
-    Console.WriteLine($"  Total skipped : {orchestrator.TotalSkipped}  (no data for period)");
-    Console.WriteLine($"  Total failed  : {orchestrator.TotalFailed}");
+        logger.Info($"--- Starting report: {report.Name} ---");
+
+        // ── Step 1 + 2: automated section click + Index Type selection ────────
+        var navResult = await StartupNavigator.PrepareReportAsync(page, report);
+
+        if (!navResult.Success)
+        {
+            logger.Error($"Startup navigation failed for '{report.Name}': {navResult.FailureReason}");
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"  Aborting entire run — startup navigation failed.");
+            Console.ResetColor();
+            Console.WriteLine();
+
+            // Log grand totals so far before exiting
+            logger.Warn($"Run aborted during startup of '{report.Name}'");
+            logger.Info($"Saved so far   : {grandSuccess}");
+            logger.Info($"Skipped so far : {grandSkipped}");
+            logger.Info($"Failed so far  : {grandFailed}");
+            goto RunAborted;
+        }
+
+        // ── Step 3: detect sub-index dropdown ─────────────────────────────────
+        Console.Write("  Locating Sub-Index dropdown... ");
+        var uniqueSubIndices = indexNames
+            .Select(x => x.SubIndex)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct()
+            .ToList();
+
+        var subIndexResult = await ReportDetector.DetectSubIndexDropdownAsync(
+            page, report, uniqueSubIndices);
+
+        string       activeSubIndexSelector = subIndexResult.ActiveSelector;
+        List<string> subIndexUIOptions      = subIndexResult.Options;
+        bool         hasSubIndexDropdown    = subIndexResult.Found;
+
+        if (hasSubIndexDropdown)
+            Console.WriteLine($"Found ({activeSubIndexSelector})");
+        else
+        {
+            Console.WriteLine("Not found. (Will process all indices flatly)");
+            logger.Warn($"[{report.Name}] Sub-index dropdown not found — running in flat mode");
+        }
+        Console.WriteLine();
+
+        // ── Step 4: run the download loop for this report ─────────────────────
+        var orchestrator = new DownloadOrchestrator(
+            page,
+            logger,
+            settings.DownloadsPath,
+            settings.DelayMs,
+            report,
+            activeSubIndexSelector,
+            hasSubIndexDropdown,
+            subIndexUIOptions,
+            indexNames,
+            chunks);
+
+        await orchestrator.RunAsync();
+
+        grandSuccess += orchestrator.TotalSuccess;
+        grandSkipped += orchestrator.TotalSkipped;
+        grandFailed  += orchestrator.TotalFailed;
+
+        logger.Info($"[{report.Name}] Saved: {orchestrator.TotalSuccess}  Skipped: {orchestrator.TotalSkipped}  Failed: {orchestrator.TotalFailed}");
+
+        // ── If the server went unresponsive, abort — no point starting next report
+        if (orchestrator.ServerUnresponsiveDetected)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"  Server became unresponsive during '{report.Name}'. Aborting remaining reports.");
+            Console.ResetColor();
+            logger.Warn($"Run aborted after server unresponsive during '{report.Name}'");
+            goto RunAborted;
+        }
+
+        Console.WriteLine();
+    }
+
+    // ── Grand summary (all reports completed normally) ────────────────────────
+    Console.WriteLine("════════════════════════════════════════════════════════");
+    Console.WriteLine($"  ALL REPORTS DONE");
+    Console.WriteLine($"  Total saved   : {grandSuccess}");
+    Console.WriteLine($"  Total skipped : {grandSkipped}  (no data for period)");
+    Console.WriteLine($"  Total failed  : {grandFailed}");
     Console.WriteLine($"  Folder        : {settings.DownloadsPath}");
-    Console.WriteLine("════════════════════════════════════════════════════");
+    Console.WriteLine("════════════════════════════════════════════════════════");
 
     logger.Info("---");
-    logger.Info($"Saved   : {orchestrator.TotalSuccess}");
-    logger.Info($"Skipped : {orchestrator.TotalSkipped}");
-    logger.Info($"Failed  : {orchestrator.TotalFailed}");
-    if (orchestrator.ServerUnresponsiveDetected)
-        logger.Warn("Run stopped early — server was unresponsive");
+    logger.Info($"Grand total saved   : {grandSuccess}");
+    logger.Info($"Grand total skipped : {grandSkipped}");
+    logger.Info($"Grand total failed  : {grandFailed}");
 
+    goto Done;
+
+    RunAborted:
+    Console.WriteLine("════════════════════════════════════════════════════════");
+    Console.WriteLine($"  RUN ABORTED");
+    Console.WriteLine($"  Saved so far   : {grandSuccess}");
+    Console.WriteLine($"  Skipped so far : {grandSkipped}  (no data for period)");
+    Console.WriteLine($"  Failed so far  : {grandFailed}");
+    Console.WriteLine($"  Folder         : {settings.DownloadsPath}");
+    Console.WriteLine($"  See log for details: {logger.LogFilePath}");
+    Console.WriteLine("════════════════════════════════════════════════════════");
+
+    Done:
     Console.WriteLine();
     Console.WriteLine("Press any key to close the browser...");
     Console.ReadKey(true);
