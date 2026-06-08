@@ -3,7 +3,9 @@
 Automates downloading historical CSV data from [niftyindices.com/reports/historical-data](https://niftyindices.com/reports/historical-data).
 The site enforces a date range limit in its UI, making bulk downloads tedious.
 
-This tool lets you **select your base report once manually**, then automatically loops through your full date range and configured indices — downloading one CSV per chunk — and saves them all to a local folder.
+This tool automatically runs through both **Historical Index Data** and **P/E, P/B & Div.Yield** reports,
+loops through your full date range and configured indices, and saves all CSVs to a local folder.
+No manual interaction is required after starting the tool.
 
 ---
 
@@ -120,23 +122,17 @@ dotnet run
 **1. Browser opens automatically**
 
 Microsoft Edge launches and navigates to the NiftyIndices historical data page.
+No manual interaction is needed at any point.
 
-**2. You select the first 2 dropdowns (manual — one time only)**
+**2. Automated startup for each report**
 
-The console will show:
-~~~text
-╔════════════════════════════════════════════════╗
-║  Select the first 2 dropdowns in the browser:  ║
-║   1. Report Type  (e.g. Historical Data)       ║
-║   2. Index Type   (e.g. Equity)                ║
-║                                                ║
-║  Do NOT touch the Sub-Index or date fields.    ║
-║  Press ENTER when dropdowns 1–2 are set.       ║
-╚════════════════════════════════════════════════╝
-~~~
+For each report type (Historical Data, then P/E, P/B & Div.Yield) the tool automatically:
+- Clicks the report section in the sidebar
+- Waits a moment for the UI to settle (tab switching is client-side)
+- Selects **Equity** as the Index Type
+- Waits for the Sub-Index dropdown to load (AJAX)
 
-Select the first two dropdowns in the browser window, then press **ENTER** in the console.
-> Do **not** touch the Sub-Index, Index Name, or date fields — the tool auto-detects and fills those automatically based on `indices.json`.
+If either AJAX call times out during startup, the entire run is aborted immediately.
 
 **3. Automated download loop runs**
 
@@ -148,9 +144,14 @@ The tool takes over completely. For each enabled index and date chunk it:
 - Clicks the CSV download link
 - Saves the file to the output folder
 
-**4. Press any key to close the browser**
+**4. Second report runs automatically**
 
-> If the server becomes unresponsive mid-run, the tool detects this automatically,
+After all indices are downloaded for Historical Data, the tool immediately starts the same
+process for P/E, P/B & Div.Yield — no pause or interaction needed.
+
+**5. Press any key to close the browser**
+
+> If the server becomes unresponsive at any point, the tool detects this automatically,
 > stops the run cleanly, and prints a warning. No manual intervention needed.
 
 ---
@@ -198,6 +199,11 @@ The site loads slowly due to third-party analytics scripts.
 The tool handles this automatically by blocking heavy assets and bypassing the analytics timeout.
 Just wait briefly — it will proceed.
 
+**Startup fails with "Could not select 'Equity'"**
+
+The Index Type dropdown was not populated or visible when the tool tried to select Equity.
+This usually means the DOM wasn't fully ready after switching tabs. Try increasing `DelayMs` in `appsettings.json` if this recurs.
+
 **A chunk shows "Skipped (no data for this period)"**
 
 The site responded but returned no data for that date range (e.g. the index did not exist yet).
@@ -210,8 +216,8 @@ The loop continues to the next chunk. Check the `.log` file for the full excepti
 
 **The run stops early with "AJAX timeout — server unresponsive"**
 
-The server did not respond within 15 seconds. This means the site is down or rate-limiting
-requests — not that data is missing. The run stops immediately and the browser closes cleanly.
+The server did not respond within 15 seconds during the download loop.
+The run stops immediately and the browser closes cleanly.
 Simply restart the tool when the server recovers. No data is silently skipped in this scenario.
 
 **Dropdowns load slowly**
@@ -226,6 +232,7 @@ If it persists, try closing other Edge windows before running.
 - Uses **Microsoft Playwright** to drive your real installed Edge browser (`Channel = "msedge"`)
 - Disables the `AutomationControlled` Chrome flag and masks `navigator.webdriver` so the site does not detect automation
 - Optimizes initial load by aborting network requests for unused assets (images, fonts, media)
+- Clicks report section `<li>` elements and waits for the UI to settle before proceeding to dropdown selection
 - Sets dates via the **jQuery UI datepicker API** (`datepicker('setDate', ...)`) which updates the datepicker's internal state — not just the visible input text
 - Clicks Submit and the CSV link via direct JavaScript (`el.click()`) to bypass Playwright's visibility requirements
 - All downloaded files are captured via Playwright's download interception and saved with descriptive filenames
