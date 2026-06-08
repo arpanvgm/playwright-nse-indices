@@ -1,37 +1,191 @@
-﻿# Learnings & Debug Knowledge — Playwright & Site Behavior
+﻿# niftyindices.com — Playwright Automation Reference
 
-Technical discoveries about automating data downloads on this site. Focus: what works, what doesn't, why.
-
----
-
-## The Core Challenge
-
-**Detecting when async data has loaded and is ready to download.**
-
-The site is SPA-like: Submit triggers AJAX, data loads asynchronously. We need to know when AJAX is done so we can check if the CSV link appeared (data exists) or stay hidden (no data).
+Authoritative reference for automating `https://niftyindices.com/reports/historical-data`.
+All facts here are confirmed from live DOM inspection and working automation runs.
+Read this before writing any Playwright code that touches this site.
 
 ---
 
-## ✅ Solution: Listen for AJAX Response (RECOMMENDED)
+## Site Architecture
 
-### Implementation
+The page is an ASP.NET WebForms SPA. It never fully reloads.
+All report tabs share one HTML document. Inactive tab elements remain in the DOM but are hidden (`offsetParent === null`).
+Every dropdown change and Submit click fires an AJAX POST. The server returns partial HTML which the page's own JS renders.
+Third-party analytics scripts run indefinitely — `NetworkIdle` never resolves on this page.
 
-// Set up response listener BEFORE triggering the AJAX.
-// Use _ajaxUrlFragment (from ReportSelectors) — NOT a hardcoded string.
-// Each report tab posts to a different endpoint; using the wrong fragment means
-// the TaskCompletionSource never fires and every chunk silently times out.
+---
+
+## Report Tabs and Their Selectors
+
+Each tab has its own isolated set of `<select>` elements and date inputs.
+The inactive tab's elements are present in the DOM but hidden — always filter by visibility before interacting.
+
+### Dropdown selectors
+
+| Report Tab | Index Type Dropdown | Sub-Index Dropdown | Index Name Dropdown |
+|---|---|---|---|
+| Historical Data | `#ddlHistoricaltypee` | `#ddlHistoricaltypeeSubindex` | `#ddlHistoricaltypeeindex` |
+| P/E, P/B & Div.Yield | `#ddlHistoricaldivtypee` | `#ddlHistoricaldivtypeeSubindex` | `#ddlHistoricaldivtypeeindex` |
+| VIX Data | TBC | TBC | TBC |
+| Total Index | TBC | TBC | TBC |
+
+### Date, Submit, and CSV selectors
+
+| Report Tab | From Date | To Date | Submit | CSV Link |
+|---|---|---|---|---|
+| Historical Data | `#datepickerFrom` | `#datepickerTo` | `#submit_button` | `#exporthistorical` |
+| P/E, P/B & Div.Yield | `#datepickerFromDivYield` | `#datepickerToDivYield` | `#submit_buttonDivdata` | `#exporthistoricaldiv` |
+| VIX Data | `#datepickerFromvixdata` | `#datepickerTovixdata` | `#submit_buttonvixdata` | `#exporthistoricalvix` |
+| Total Index | `#datepickerFromtotalindex` | `#datepickerTototalindex` | `#submit_totalindexhistorical` | `#exportTotalindex` |
+
+### AJAX URL fragments
+
+Each Submit click POSTs to the server. Listen for the response URL to detect completion.
+
+| Report Tab | AjaxUrlFragment |
+|---|---|
+| Historical Data | `Backpage.aspx` |
+| P/E, P/B & Div.Yield | `Backpage.aspx` |
+| VIX Data | `Backpage.aspx` |
+| Total Index | `Backpage.aspx` |
+
+> To find the fragment for a new tab: open Edge DevTools → Network → filter XHR →
+> manually click Submit → copy a unique substring from the POST request URL.
+
+### Selector naming pattern
+
+All dropdown IDs follow: `ddlHistorical` + tab-prefix + role.
+
+| Tab | Prefix | Sub-Index ID | Index Name ID |
+|---|---|---|---|
+| Historical Data | `typee` | `ddlHistoricaltypeeSubindex` | `ddlHistoricaltypeeindex` |
+| P/E, P/B & Div.Yield | `divtypee` | `ddlHistoricaldivtypeeSubindex` | `ddlHistoricaldivtypeeindex` |
+
+Use this pattern to predict IDs for VIX and Total Index tabs before confirming in DevTools.
+
+---
+
+## Dropdown Interaction Rules
+
+### 1. Always target dropdowns by their specific ID
+
+Never pass `null` to scan all visible selects. Multiple dropdowns are visible simultaneously
+and the wrong one will be matched.
+
+~~~csharp
+// ✅ Correct — targets exactly the right dropdown
+await SelectDropdownByTextAsync(page, indexName, "#ddlHistoricaltypeeindex");
+
+// ❌ Wrong — scans all visible selects, will hit the wrong one
+await SelectDropdownByTextAsync(page, indexName, null);
+~~~
+
+### 2. Fire jQuery change event after setting a dropdown value
+
+The site uses jQuery event handlers to trigger AJAX chains. Setting `.value` alone does nothing.
+Always fire the change event after setting the value:
+
+~~~javascript
+jQuery(select).val(option.value).trigger('change');
+
+// Fallback if jQuery is unavailable:
+select.dispatchEvent(new Event('input',  { bubbles: true }));
+select.dispatchEvent(new Event('change', { bubbles: true }));
+~~~
+
+### 3. Cascade order is strict — wait for AJAX between steps
+
+- Selecting **Index Type** → triggers AJAX → populates **Sub-Index** dropdown
+- Selecting **Sub-Index** → triggers AJAX → populates **Index Name** dropdown
+- Selecting **Index Name** → no AJAX, UI state only
+
+Never attempt to select a downstream dropdown before its upstream AJAX has completed.
+The Index Name dropdown will be empty and selection will silently fail.
+
+### 4. How to find which options are available in a dropdown
+
+Run in DevTools Console after the tab and Index Type are selected:
+
+~~~javascript
+Array.from(document.querySelectorAll('select'))
+    .filter(s => s.offsetParent !== null)
+    .forEach(s => console.log(
+        s.id,
+        Array.from(s.options).map(o => o.textContent.trim())
+    ));
+~~~
+
+---
+
+## Date Input Rules
+
+### Use the jQuery UI datepicker API — not native input methods
+
+The date inputs are jQuery UI datepicker widgets. The Submit button reads the datepicker's
+internal state, not the visible input value. Native `FillAsync` or setting `.value` directly
+updates only the visible text — Submit ignores it.
+
+~~~javascript
+// ✅ Correct — updates internal datepicker state
+jQuery('#datepickerFrom').datepicker('setDate', new Date(2020, 0, 1));
+
+// ❌ Wrong — updates only visible text, Submit reads old internal state
+document.querySelector('#datepickerFrom').value = '01-01-2020';
+~~~
+
+### Fallback if jQuery is unavailable
+
+~~~javascript
+const el = document.querySelector(selector);
+const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+setter.call(el, value);
+el.dispatchEvent(new Event('input',  { bubbles: true }));
+el.dispatchEvent(new Event('change', { bubbles: true }));
+el.dispatchEvent(new Event('blur',   { bubbles: true }));
+~~~
+
+### Date format
+
+Always pass dates as `dd-MM-yyyy` (e.g. `01-01-2020`).
+
+---
+
+## Clicking Elements
+
+### Use JavaScript click — not Playwright's ClickAsync
+
+`ClickAsync` requires the element to be in the viewport and visible. Several elements on
+this page (Submit, CSV link) may be scrolled out of view or inside conditionally shown
+sections. JS click bypasses all visibility requirements.
+
+~~~csharp
+// ✅ Correct
+await page.EvaluateAsync($"() => document.querySelector('{selector}')?.click()");
+
+// ❌ Wrong — times out if element is off-screen or in a hidden section
+await page.ClickAsync(selector);
+~~~
+
+---
+
+## Detecting AJAX Completion
+
+### The only reliable method: listen for the response event
+
+Set up the listener **before** triggering the action. Race it against a timeout.
+**Always check which task won** — do not ignore the return value of `Task.WhenAny`.
+
+~~~csharp
 var ajaxCompleted = new TaskCompletionSource<bool>();
 EventHandler<IResponse> responseHandler = (_, response) =>
 {
     if (response.Url.Contains(_ajaxUrlFragment) && response.Status == 200)
         ajaxCompleted.TrySetResult(true);
 };
-page.Response += responseHandler;
+_page.Response += responseHandler;
 
-// Click the button that triggers AJAX
-await JsClick(page, SUBMIT_SEL);
+// Trigger the action (dropdown change or Submit click) here
 
-// Race: AJAX response vs timeout — ALWAYS save the winner
 var timeoutTask = Task.Delay(15_000);
 Task winner;
 try
@@ -40,458 +194,140 @@ try
 }
 finally
 {
-    page.Response -= responseHandler;  // always clean up
+    _page.Response -= responseHandler;  // always unsubscribe
 }
 
-// Check who won — this is critical
 if (winner == timeoutTask)
 {
-    // Server did not respond — this is a server failure, NOT a no-data period
-    // Do NOT fall through to csvVisible check — it will always be false here
-    // and will silently misreport a server outage as "no data"
+    // Server did not respond within 15 s — treat as server failure, stop the run
+    // Do NOT fall through to check CSV visibility — it will always be false here
 }
 else
 {
-    // AJAX completed — now CSV visibility is a reliable signal
-    await page.WaitForTimeoutAsync(750);  // DOM update buffer
-    var visible = await page.IsVisibleAsync(CSV_SEL);
+    await page.WaitForTimeoutAsync(750);  // allow DOM to update after response
+    var csvVisible = await page.IsVisibleAsync(csvSelector);
 }
+~~~
 
-### Why Checking the Winner Matters
+### Why checking the winner is mandatory
 
-| Scenario | AJAX responds? | CSV visible? | If winner not checked | If winner checked |
+| Scenario | AJAX responds? | CSV visible? | Winner ignored | Winner checked |
 |---|---|---|---|---|
-| Data exists | ✅ Yes (1–3 s) | ✅ Yes | Download ✅ | Download ✅ |
-| No data for period | ✅ Yes (1–3 s) | ❌ No | Skip ✅ | Skip ✅ |
-| Server unresponsive | ❌ No (timeout) | ❌ No | **Silent skip** ❌ | Stop run ✅ |
+| Data exists | ✅ Yes | ✅ Yes | Download ✅ | Download ✅ |
+| No data for period | ✅ Yes | ❌ No | Skip ✅ | Skip ✅ |
+| Server unresponsive | ❌ Timeout | ❌ No | Silent skip ❌ | Stop run ✅ |
 
-**Real-world symptom of the bug:** every chunk takes exactly 15–16 seconds and logs
-`Skipped` — even for indices that definitely have data. The server was down, but the
-code was misreading timeouts as no-data responses.
+Ignoring the winner causes server outages to be silently logged as "no data".
+Every chunk takes exactly 15 seconds and reports "Skipped" — zero downloads, zero errors.
 
-### Why This Works
+### Never use RouteAsync for observation
 
-| Aspect | Benefit |
-|--------|---------|
-| **Direct signal** | AJAX response = data processing is done. No guessing. |
-| **Server speed agnostic** | Slow server? We wait. Fast server? We proceed. Automatic. |
-| **No DOM tricks** | Doesn't depend on visibility, CSS, or element state. Pure network signal. |
-| **Passive observation** | Listening to response event doesn't interfere with page's own JS. |
-| **Consistent timing** | Both "data found" and "no data" scenarios resolve in 1–3 seconds. |
+`RouteAsync` intercepts requests even with `ContinueAsync`. This subtly alters timing
+and breaks the AJAX chain — cascading dropdowns stop populating.
+Use `page.Response` (passive observation) only.
 
----
+### Never read response body in the event handler
 
-## ❌ What NOT to Do
+~~~csharp
+// ❌ Wrong — locks the response stream, page JS cannot read it
+page.Response += async (_, r) => { var body = await r.TextAsync(); };
 
-### 1. NetworkIdle (Unreliable)
-
-await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 15_000 });
-
-**Problem:** Analytics, tracking, and third-party scripts keep firing indefinitely. Network never truly "idle".
-
-**Result:** Timeout waits or fragile timing.
-
----
-
-### 2. WaitForSelectorAsync(Visible) on Always-Present Elements
-
-await page.WaitForSelectorAsync(CSV_SEL, new() { State = WaitForSelectorState.Visible, Timeout = 20_000 });
-
-**Problem:** The CSV link (`#exporthistoricaldiv`) is always in the DOM. It's just hidden/shown via CSS.
-
-**Expected:** Element becomes visible (AJAX completes, data loads).
-**Reality:** Element already exists but hidden. Wait never resolves until timeout.
-**Impact:** 20-second waste when no data exists.
-
----
-
-### 3. Pre-Manipulating DOM with Inline Styles
-
-await page.EvaluateAsync($@"() => {{
-    document.querySelector('{CSV_SEL}').style.display = 'none';
-}}");
-
-**Problem:** Inline `style.display:none` has higher specificity than CSS classes. Site's JS can't easily override it.
-
-**Result:** Even when data loads, CSV stays hidden because our inline style blocks it.
-
----
-
-### 4. RouteAsync for Observation (Breaks Page)
-
-await page.RouteAsync("**/Backpage.aspx", route => { /* observe */ route.ContinueAsync(); });
-
-**Problem:** Even with `ContinueAsync()`, request interception subtly alters timing. AJAX chains break.
-
-**Result:** Cascading dropdowns stop loading, AJAX calls fail.
-
-**Rule:** Use `page.RouteAsync` ONLY if you need to modify/block requests. Never for observation.
-
----
-
-### 5. Reading Response Body in Event Handler
-
-page.Response += async (_, response) =>
-{
-    var body = await response.TextAsync();  // ❌ LOCKS response
-};
-
-**Problem:** `response.TextAsync()` consumes the response stream. Locks it from the page's own JavaScript.
-
-**Result:** Page can't read the response data. AJAX handlers break.
-
-**Rule:** Use response listener ONLY for metadata (URL, status). Never call `TextAsync()` in the handler.
-
----
-
-### 6. Not Checking the Winner of Task.WhenAny
-
-// ❌ Wrong — ignores which task won
-await Task.WhenAny(ajaxCompleted.Task, Task.Delay(15_000));
-var csvVisible = await page.IsVisibleAsync(CSV_SEL);
-
-**Problem:** If the timeout wins (server down), `csvVisible` will be false and the chunk
-is silently logged as "no data". A server outage becomes invisible in the output.
-
-**Result:** Entire runs complete with zero downloads and zero errors — all silently skipped.
-
-**Rule:** Always save the return value of `Task.WhenAny` and check which task won before
-deciding what the result means.
-
----
-
-### 7. Hardcoding AJAX URL Fragments
-
-// ❌ Wrong — only works for Historical Data tab
-if (response.Url.Contains("Backpage.aspx") && response.Status == 200)
-
-**Problem:** Each report tab posts to a different server-side endpoint. The PE tab
-(`P/E, P/B & Div.Yield`) uses a completely different URL from `Backpage.aspx`.
-Hardcoding the wrong fragment means `ajaxCompleted` never fires, the 15-second
-timeout wins every single chunk, and all chunks are silently misreported as "no data".
-
-**Result:** All chunks skip instantly (or after timeout). Zero downloads. Zero errors logged.
-
-**Rule:** Always use `_ajaxUrlFragment` sourced from `ReportSelectors.AjaxUrlFragment`.
-Never hardcode a URL fragment in `DownloadOrchestrator`.
-
----
-
-### 8. Passing null as the Index Name Dropdown Selector
-
-// ❌ Wrong — scans ALL visible selects, hits the wrong one
-var selected = await SelectDropdownByTextAsync(page, indexName, null);
-
-**Problem:** On the PE tab there are multiple visible dropdowns. Passing `null` scans all
-of them and may match the wrong one (e.g. a category dropdown that happens to have an
-option with the same text), or fail to match at all if the index name dropdown isn't the
-first visible select encountered.
-
-**Rule:** Always pass the report-specific `IndexNameDropdown` selector from `ReportSelectors`.
-This targets exactly the right `<select>` regardless of what else is visible on the page.
-
----
-
-## 📍 Site Behavior: When Data Loads
-
-### Sequence (Data Available)
-1. **User selects dates** (or program via `SetDate`)
-2. **User clicks Submit** (or program via `JsClick`)
-3. **AJAX fires** → POST to report-specific endpoint
-4. **Server responds** (1–3 seconds typically)
-5. **Page's JS processes response** → updates DOM
-6. **Data table renders** with rows
-7. **Index Name displays**
-8. **CSV link appears** (becomes visible)
-
-### No Data Scenario
-1. **Same steps 1–4**
-2. **Server responds** but with empty/no-data indicator
-3. **Page's JS processes response** → doesn't render table
-4. **CSV link stays hidden** (no change from initial state)
-5. **No error message** — just silent absence
-
-### Key Insight
-The site doesn't show an error for "no data". It simply doesn't render the CSV link.
-**The CSV link's visibility IS the data availability signal — but only when AJAX actually completed.**
-If the AJAX timed out, CSV visibility tells you nothing.
-
----
-
-## DOM & Element Visibility Challenges
-
-### CSV Link is Always in DOM
-
-<a href="#" id="exporthistoricaldiv">csv format</a>
-
-- Always present in HTML
-- Hidden by default via CSS class/style
-- Made visible by site's JS when data loads
-- **Problem:** `WaitForSelectorAsync` (checking existence) passes immediately because element exists
-
-### Visibility Check vs Existence Check
-
-// ❌ Wrong: checks if element exists (always true)
-await page.WaitForSelectorAsync(CSV_SEL, new() { Timeout = 20_000 });
-
-// ✅ Right: checks if element is visible (what we actually want)
-var isVisible = await page.IsVisibleAsync(CSV_SEL);
-
-### offsetParent Check in JavaScript
-
-element.offsetParent === null  // element is hidden (display:none, visibility:hidden, or ancestor hidden)
-element.offsetParent !== null  // element is visible
-
-Use this in custom JS for manual visibility checks.
-
----
-
-## Confirmed Selector IDs by Report Tab
-
-Confirmed from live DOM inspection (DevTools → Console → querySelectorAll('select')).
-
-| Report Tab | Index Type Dropdown | Sub-Index Dropdown | Index Name Dropdown |
-|---|---|---|---|
-| P/E, P/B & Div.Yield | `#ddlHistoricaldivtypee` | `#ddlHistoricaldivtypeeSubindex` | `#ddlHistoricaldivtypeeindex` |
-| Historical Data | `#ddlHistoricaltypee` | `#ddlHistoricaltypeeSubindex` | `#ddlHistoricaltypeeindex` |
-| VIX Data | — | `#ddlHistoricalvixsubindex` | `#ddlHistoricalvixindex` |
-| Total Index | — | `#ddlHistoricaltotalsubindex` | `#ddlHistoricaltotalindex` |
-
-**Note:** The PE tab uses a completely separate set of `<select>` elements from the
-Historical Data tab. They coexist in the DOM simultaneously — the inactive tab's
-dropdowns are hidden (`offsetParent === null`). This is why the smart scanner must
-check visibility before matching options.
-
-### How to find selectors for a new report tab
-
-Run this in DevTools Console after selecting the report tab manually:
-
-~~~javascript
-Array.from(document.querySelectorAll('select'))
-    .filter(s => s.offsetParent !== null)
-    .forEach(s => console.log(s.id, Array.from(s.options).map(o => o.textContent.trim())));
+// ✅ Correct — observe URL and status only
+page.Response += (_, r) => { if (r.Url.Contains("Backpage.aspx")) ... };
 ~~~
 
 ---
 
-## AJAX URL Fragments by Report Type
+## Checking Whether Data Exists
 
-Each report tab posts to a different server-side endpoint. Using the wrong
-URL fragment means the AJAX listener never fires, the timeout wins every time,
-and every chunk is silently misreported as "no data".
+The CSV link (`#exporthistorical`, `#exporthistoricaldiv`, etc.) is **always present in the DOM**.
+It is never added or removed — only shown or hidden via CSS.
 
-| Report Tab | AjaxUrlFragment |
-|---|---|
-| P/E, P/B & Div.Yield | `Backpage.aspx` |
-| Historical Data | `Backpage.aspx` |
-| VIX Data | `Backpage.aspx` |
-| Total Index | `Backpage.aspx` |
+- After AJAX completes: check `page.IsVisibleAsync(csvSelector)`
+- Visible → data exists → proceed to download
+- Hidden → no data for this date range → skip silently (the site shows no error)
 
-These values live in `Program.cs` inside the `knownReports` array.
+~~~csharp
+// ✅ Correct — checks visibility
+var csvVisible = await page.IsVisibleAsync("#exporthistorical");
 
-**How to find the correct fragment for a new report type:**
-1. Open Edge DevTools → Network tab
-2. Manually select an index, set dates, and click Submit
-3. Watch for the XHR/Fetch request that returns the data (status 200, not a static asset)
-4. Copy a unique substring from that request URL and use it as `AjaxUrlFragment`
+// ❌ Wrong — always true because element always exists in DOM
+await page.WaitForSelectorAsync("#exporthistorical");
+~~~
 
 ---
 
-## Date Setting: jQuery Datepicker
+## Page Load
 
-### Native Input Methods Don't Work
+### Use DOMContentLoaded, not Load
 
-// ❌ This doesn't work:
-await page.FillAsync(selector, "01-01-2020");
+Third-party analytics scripts on this page never finish loading. `WaitUntilState.Load`
+hangs indefinitely. Use `DOMContentLoaded` and swallow the timeout exception.
 
-**Why:** jQuery UI datepicker maintains internal date state separate from the input's visible value. Submit button reads the internal state, not the input value.
-
-### Correct Approach: Use jQuery API
-
-await page.EvaluateAsync($@"() => {{
-    jQuery('#datepickerFromDivYield').datepicker('setDate', new Date(2020, 0, 1));
-}}");
-
-**Why:** Updates both the internal state (what Submit reads) and the visual input.
-
-### Fallback (If jQuery Unavailable)
-
-// Set value + fire events
-const el = document.querySelector(selector);
-el.value = '01-01-2020';
-el.dispatchEvent(new Event('input', { bubbles: true }));
-el.dispatchEvent(new Event('change', { bubbles: true }));
-el.dispatchEvent(new Event('blur', { bubbles: true }));
-
-Less reliable but works on non-jQuery inputs.
-
----
-
-## Clicking Elements: JS Click vs ClickAsync
-
-### ClickAsync Issues
-
-await page.ClickAsync(selector);  // ❌ Can timeout if element off-screen or in hidden section
-
-**Problem:** Playwright's `ClickAsync` waits for element to be in viewport, visible, and stable. Elements in hidden sections cause 30-second timeout.
-
-### JS Click (Bypasses Visibility Requirement)
-
-await page.EvaluateAsync($@"() => {{
-    document.querySelector('{selector}')?.click();
-}}");
-
-**Benefit:** Clicks element regardless of visibility, scroll position, or section state.
-
-**Use case:** When clicking elements that might be scrolled out of view or in hidden DOM sections.
-
----
-
-## Timeout Strategy: Task.WhenAny Racing
-
-### Problem: Sequential Timeouts Waste Time
-
-// ❌ Waits for both, cumulative: could be 20+ seconds
-await page.WaitForSelectorAsync(..., new() { Timeout = 10_000 });
-await page.WaitForSelectorAsync(..., new() { Timeout = 10_000 });
-
-### Solution: Race Multiple Conditions
-
-// ✅ Resolves when EITHER completes — and always check the winner
-var timeoutTask   = Task.Delay(15_000);
-var winner        = await Task.WhenAny(ajaxCompleted.Task, timeoutTask);
-
-if (winner == timeoutTask)
-    // handle failure
-else
-    // handle success
-
-**Benefit:** Both "success" and "failure" paths resolve quickly without waiting for timeouts.
-
----
-
-## Page Load Timeouts from Third-Party Scripts
-
-### GotoAsync Hangs Indefinitely
-
-// ❌ This times out — analytics never finish loading
-await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.Load });
-
-### Solution: DOMContentLoaded + Exception Swallow
-
-// ✅ DOMContentLoaded fires quickly, content is ready
+~~~csharp
 try
 {
-    await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 60_000 });
+    await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 15_000 });
 }
 catch (TimeoutException)
 {
-    // Analytics still loading — that's fine, page content is ready
+    // Analytics still loading — page content is ready, continue
 }
+~~~
 
-**Why:** Google Analytics, Tag Manager, and other third-party scripts sometimes never finish. `DOMContentLoaded` fires when the page's own content is ready, ignoring third-party hangers.
+### Block heavy assets before navigating
+
+Blocking images, fonts, and media speeds up the initial load significantly.
+
+~~~csharp
+await page.RouteAsync("**/*", route =>
+{
+    var type = route.Request.ResourceType;
+    if (type == "image" || type == "media" || type == "font")
+        return route.AbortAsync();
+    return route.ContinueAsync();
+});
+~~~
 
 ---
 
-## Browser Detection & Anti-Bot Measures
+## Anti-Bot Detection
 
-### Two Flags Give Away Automation
+The site detects automation via two browser signals. Without masking both, dropdowns
+load slowly (10–30 seconds per change). With both masked, response is instant.
 
-**1. navigator.webdriver**
+### 1. Mask navigator.webdriver
 
-// ❌ Sites detect this:
-navigator.webdriver === true
-
-**Fix:**
-
+~~~csharp
 await context.AddInitScriptAsync(
     "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });");
+~~~
 
-**2. AutomationControlled Chrome Flag**
+### 2. Disable AutomationControlled flag — use real Edge, not bundled Chromium
 
-// ❌ Chromium bundled with Playwright launches with this flag
-
-**Fix:**
-
+~~~csharp
 await playwright.Chromium.LaunchAsync(new()
 {
-    Channel = "msedge",  // Use real installed Edge, not bundled Chromium
-    Args = new[] { "--disable-blink-features=AutomationControlled" }
+    Channel = "msedge",
+    Args    = new[] { "--disable-blink-features=AutomationControlled" }
 });
-
-**Combined effect:** Browser becomes indistinguishable from manual user in Edge.
-
-**Note:** Without these fixes, the site throttles dropdown loading (10–30 seconds per dropdown). With both, instant response.
+~~~
 
 ---
 
-## Passive Event Listeners (Safe)
+## Quick Reference — Do and Don't
 
-### What's Safe
-
-page.Request += (_, request) =>
-{
-    Console.WriteLine(request.Url);  // ✅ Safe
-};
-
-page.Response += (_, response) =>
-{
-    if (response.Status == 200)  // ✅ Safe
-        Console.WriteLine("Success");
-};
-
-**Why:** Pure observation. Doesn't alter request/response.
-
-### What's Unsafe
-
-page.Response += async (_, response) =>
-{
-    var body = await response.TextAsync();  // ❌ Unsafe — locks response
-};
-
----
-
-## Summary: Core Principles
-
-| Principle | Reason |
-|-----------|--------|
-| **Listen for AJAX response, not DOM state** | Direct signal; handles variable server speed |
-| **Always check the winner of Task.WhenAny** | Timeout ≠ no data; server down must be detected |
-| **Use passive observation, not interception** | Doesn't break page's own JavaScript |
-| **Avoid pre-manipulating DOM** | Fights with site's CSS and JS |
-| **JS click instead of ClickAsync for hidden elements** | Bypasses visibility requirements |
-| **DOMContentLoaded instead of Load** | Third-party scripts don't block |
-| **Mask webdriver and AutomationControlled** | Site treats you like a human user |
-| **Task.WhenAny for racing conditions** | Resolves quickly without timeout waste |
-| **Never hardcode AJAX URL fragments** | Each report tab has its own endpoint; use `ReportSelectors.AjaxUrlFragment` |
-| **Always pass IndexNameDropdown to SelectDropdownByTextAsync** | Prevents matching wrong visible dropdown on page |
-
----
-
-## What Worked in This Automation
-
-✅ AJAX response listener (page.Response event)
-✅ Checking Task.WhenAny winner to distinguish timeout from no-data
-✅ Passive observation only (no RouteAsync)
-✅ JS-based clicking for off-screen elements
-✅ CSV visibility as "data ready" signal (only after confirmed AJAX completion)
-✅ jQuery datepicker API for date setting
-✅ DOMContentLoaded with TimeoutException catch
-✅ Real Edge browser with anti-bot flags masked
-✅ Per-report IndexNameDropdown selector (prevents wrong dropdown selection)
-✅ Per-report AjaxUrlFragment (prevents silent timeout-as-no-data misreporting)
-
----
-
-## What Didn't Work
-
-❌ NetworkIdle (third-party requests interfere)
-❌ WaitForSelectorAsync on always-present elements
-❌ Pre-hiding with inline styles
-❌ RouteAsync for observation
-❌ Reading response.TextAsync() in event handler
-❌ ClickAsync on off-screen elements
-❌ Bundled Chromium without anti-bot fixes
-❌ Task.WhenAny without checking the winner (silent server failures)
-❌ Hardcoded "Backpage.aspx" URL fragment (wrong for PE tab, silent failure)
-❌ null selector for index name dropdown (matches wrong visible select on PE tab)
+| Topic | ✅ Do | ❌ Don't |
+|---|---|---|
+| Page load | `WaitUntil = DOMContentLoaded` + swallow TimeoutException | `WaitUntil = Load` — hangs forever |
+| Asset loading | Block images/fonts/media via RouteAsync | Load everything — slow and unnecessary |
+| Observation | `page.Response` event (passive) | `page.RouteAsync` — breaks AJAX chains |
+| AJAX detection | Listen for response URL + race with timeout | `NetworkIdle` — never resolves |
+| Task.WhenAny | Always save and check the winner | Ignore return value — causes silent failures |
+| Response body | Never read in event handler | `response.TextAsync()` in handler — locks stream |
+| Dropdown targeting | Pass specific selector ID | Pass `null` — hits wrong dropdown |
+| Dropdown change | Fire jQuery `trigger('change')` | Set `.value` only — AJAX chain won't fire |
+| Date input | jQuery `datepicker('setDate', ...)` | `FillAsync` or `.value =` — Submit ignores it |
+| Clicking | `element.click()` via JS | `page.ClickAsync` — times out on off-screen elements |
+| CSV detection | `page.IsVisibleAsync` | `WaitForSelectorAsync` — always resolves, element always exists |
+| Browser | Real Edge + anti-bot flags masked | Bundled Chromium — detected, dropdowns throttled |
