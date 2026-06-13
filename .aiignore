@@ -11,4 +11,10 @@ TestResults/
 *.log
 *.tmp
 
+
+
+IndexCsvConsolidator\docs
+
+
+Playwright.NSE.Indices\Docs
 indices.json
