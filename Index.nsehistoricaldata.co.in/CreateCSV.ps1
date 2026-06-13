@@ -14,8 +14,8 @@
 # ==========================================
 
 $scriptDir = $PSScriptRoot
-$inputFolder = Join-Path $scriptDir "..\DownloadedData\SectoralPrices"
-$outputFolder = Join-Path $scriptDir "..\MainCsvStorage"
+$inputFolder = Join-Path $scriptDir ".\DownloadedData\SectoralPrices"
+$outputFolder = Join-Path $scriptDir ".\MainCsvStorage"
 
 # Create output folder if not exists
 if (!(Test-Path $outputFolder)) {
