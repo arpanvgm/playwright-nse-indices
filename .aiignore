@@ -11,10 +11,17 @@ TestResults/
 *.log
 *.tmp
 
-
-
-IndexCsvConsolidator\docs
-
-
-Playwright.NSE.Indices\Docs
+# Items to be ignoured from Playwright.NSE.Indices
+Playwright.NSE.Indices/docs/
+PlaywrightUninstall.md
 indices.json
+
+# Items to be ignoured from IndexCsvConsolidator
+IndexCsvConsolidator/docs/
+IndexCsvConsolidator/CsvSamples/
+
+# We no longer using this folder or project 
+Index.nsehistoricaldata.co.in/
+
+# Items to be ignoured from root
+Notes.md
