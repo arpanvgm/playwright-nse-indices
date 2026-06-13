@@ -48,6 +48,23 @@
                 "${workspaceFolder}/IndexCsvConsolidator/IndexCsvConsolidator.csproj"
             ],
             "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "⚡ ai-bridge apply --paste",
+            "command": "ai-bridge",
+            "type": "process",
+            "args": [
+                "apply",
+                "--paste"
+            ]
+        },
+        {
+            "label": "📦 ai-bridge pack",
+            "command": "ai-bridge",
+            "type": "process",
+            "args": [
+                "pack"
+            ]
         }
     ]
 }

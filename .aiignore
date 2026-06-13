@@ -25,3 +25,5 @@ Index.nsehistoricaldata.co.in/
 
 # Items to be ignoured from root
 Notes.md
+NseDownloads/
+NseData/
