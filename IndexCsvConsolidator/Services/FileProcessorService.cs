@@ -20,7 +20,6 @@ public class FileProcessorService
     public void ProcessAll()
     {
         string[] files = Directory.GetFiles(_settings.InputFolder, "*.csv");
-
         if (files.Length == 0)
         {
             _log.Info("No CSV files found in input folder.");
@@ -31,7 +30,6 @@ public class FileProcessorService
         int total = files.Length;
         int success = 0;
         int failed = 0;
-
         _log.Info($"Found {total} file(s) in input folder.");
 
         foreach (string filePath in files)
@@ -75,7 +73,6 @@ public class FileProcessorService
             }
 
             string normalizedIndexName = IndexNameNormalizer.Normalize(rawIndexName);
-
             string masterPath = Path.Combine(
                 _settings.OutputFolder,
                 $"Main_{normalizedIndexName}.csv");
@@ -86,9 +83,7 @@ public class FileProcessorService
                 return false;
             }
 
-           
             List<MasterRecord> masterRecords = _repository.Load(masterPath);
-
             var masterDict = new Dictionary<string, MasterRecord>(StringComparer.OrdinalIgnoreCase);
             foreach (MasterRecord r in masterRecords)
                 masterDict[$"{r.IndexName}|{r.Date}"] = r;
@@ -219,12 +214,25 @@ public class FileProcessorService
             : Path.Combine(_settings.ArchiveFolder, subFolder);
 
         Directory.CreateDirectory(archiveFolder);
-
         string destination = Path.Combine(archiveFolder, fileName);
 
-        if (File.Exists(destination))
-            File.Delete(destination);
-
-        File.Move(filePath, destination);
+        try
+        {
+            File.Copy(filePath, destination, overwrite: true);
+            
+            if (File.Exists(destination))
+            {
+                File.Delete(filePath);
+                _log.Info($"Successfully archived and removed original file: {fileName}");
+            }
+            else
+            {
+                _log.Error($"File '{fileName}': Copy completed but destination file not found. Original file kept.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"File '{fileName}': Archive failed — {ex.Message}. Original file kept.");
+        }
     }
 }
