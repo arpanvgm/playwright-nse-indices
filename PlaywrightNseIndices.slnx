@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="IndexCsvConsolidator/IndexCsvConsolidator.csproj" />
+  <Project Path="Playwright.NSE.Indices/Playwright.NSE.Indices.csproj" />
+</Solution>

@@ -1,0 +1,53 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "🏗️ build (Solution)",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "build",
+                "${workspaceFolder}/PlaywrightNseIndices.slnx",
+                "/property:GenerateFullPaths=true",
+                "/consoleloggerparameters:NoSummary"
+            ],
+            "problemMatcher": "$msCompile",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "🧹 clean (Solution)",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "clean",
+                "${workspaceFolder}/PlaywrightNseIndices.slnx"
+            ],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "▶️ run (Playwright.NSE.Indices)",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "run",
+                "--project",
+                "${workspaceFolder}/Playwright.NSE.Indices/Playwright.NSE.Indices.csproj"
+            ],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "▶️ run (IndexCsvConsolidator)",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "run",
+                "--project",
+                "${workspaceFolder}/IndexCsvConsolidator/IndexCsvConsolidator.csproj"
+            ],
+            "problemMatcher": "$msCompile"
+        }
+    ]
+}
