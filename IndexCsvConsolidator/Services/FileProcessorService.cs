@@ -1,4 +1,4 @@
-using IndexCsvConsolidator.Models;
+﻿using IndexCsvConsolidator.Models;
 
 namespace IndexCsvConsolidator.Services;
 
@@ -201,8 +201,26 @@ public class FileProcessorService
 
     private void ArchiveFile(string filePath)
     {
-        Directory.CreateDirectory(_settings.ArchiveFolder);
-        string destination = Path.Combine(_settings.ArchiveFolder, Path.GetFileName(filePath));
+        string fileName = Path.GetFileName(filePath);
+
+        string subFolder;
+        if (fileName.Contains("_PE_", StringComparison.OrdinalIgnoreCase))
+            subFolder = "peData";
+        else if (fileName.Contains("_Price_", StringComparison.OrdinalIgnoreCase))
+            subFolder = "priceData";
+        else
+        {
+            _log.Warning($"File '{fileName}': Could not determine archive subfolder from filename. Archiving to root.");
+            subFolder = string.Empty;
+        }
+
+        string archiveFolder = string.IsNullOrEmpty(subFolder)
+            ? _settings.ArchiveFolder
+            : Path.Combine(_settings.ArchiveFolder, subFolder);
+
+        Directory.CreateDirectory(archiveFolder);
+
+        string destination = Path.Combine(archiveFolder, fileName);
 
         if (File.Exists(destination))
             File.Delete(destination);

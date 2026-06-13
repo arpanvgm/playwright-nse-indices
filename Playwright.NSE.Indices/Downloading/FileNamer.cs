@@ -3,7 +3,7 @@
 public static class FileNamer
 {
     /// <summary>
-    /// Derives the report suffix token used in filenames and subfolder names.
+    /// Derives the report suffix token used in filenames.
     /// e.g. "P/E, P/B &amp; Div.Yield" → "PE", everything else → "Price"
     /// </summary>
     public static string GetReportSuffix(string reportName)
@@ -11,7 +11,8 @@ public static class FileNamer
 
     /// <summary>
     /// Builds the full output file path.
-    /// Pattern: {downloadsPath}/{reportSuffix}/{safeIndexName}_{reportSuffix}_{YYYY}.csv
+    /// All files are saved flat into downloadsPath with no subfolders.
+    /// Pattern: {downloadsPath}/{safeIndexName}_{reportSuffix}_{YYYY}.csv
     /// </summary>
     public static string BuildFilePath(
         string downloadsPath,
@@ -19,10 +20,9 @@ public static class FileNamer
         string safeIndexName,
         DateTime periodEnd)
     {
-        var folder   = Path.Combine(downloadsPath, reportSuffix);
-        Directory.CreateDirectory(folder);
+        Directory.CreateDirectory(downloadsPath);
         var filename = $"{safeIndexName}_{reportSuffix}_{periodEnd:yyyy}.csv";
-        return Path.Combine(folder, filename);
+        return Path.Combine(downloadsPath, filename);
     }
 
     /// <summary>
