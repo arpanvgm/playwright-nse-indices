@@ -1,4 +1,4 @@
-{
+﻿{
     "version": "2.0.0",
     "tasks": [
         {
@@ -56,7 +56,8 @@
             "args": [
                 "apply",
                 "--paste"
-            ]
+            ],
+            "problemMatcher": []
         },
         {
             "label": "📦 ai-bridge pack",
@@ -64,7 +65,8 @@
             "type": "process",
             "args": [
                 "pack"
-            ]
+            ],
+            "problemMatcher": []
         }
     ]
 }
